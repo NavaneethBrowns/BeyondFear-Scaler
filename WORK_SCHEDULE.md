@@ -4,9 +4,9 @@ Use this file as the running checklist for implementation. Tick items off as the
 
 ## Where We Stand
 
-- Current date: 2026-07-20
-- Overall status: Day 1 and Day 2 are complete. Frontend design system is done, and backend auth/login flow is verified end to end.
-- Immediate next step: Day 3 backend sessions and persistence.
+- Current date: 2026-07-23
+- Overall status: Day 1 through Day 5 are complete. Frontend design system, auth flow, session persistence, backend chat/action-log flow, and frontend integration with session/message APIs are in place.
+- Immediate next step: Day 6 chat input and message capture polish.
 
 ## Status Key
 
@@ -19,9 +19,9 @@ Use this file as the running checklist for implementation. Tick items off as the
 
 - [x] Day 1 - Frontend visual system and landing experience
 - [x] Day 2 - Backend auth and login flow
-- [ ] Day 3 - Backend sessions and persistence
-- [ ] Day 4 - Backend chat logic and response flow
-- [ ] Day 5 - App routing and frontend integration
+- [x] Day 3 - Backend sessions and persistence
+- [x] Day 4 - Backend chat logic and response flow
+- [x] Day 5 - App routing and frontend integration
 - [ ] Day 6 - Chat input and message capture
 - [ ] Day 7 - Conversation thread and first full user flow
 
@@ -89,4 +89,4 @@ Use this file as the running checklist for implementation. Tick items off as the
 - Keep this file updated instead of spreading the plan across multiple documents.
 - Prefer small, reviewable changes per task.
 - Mark a task complete only after it is verified in the app.
-- Backend auth currently supports in-memory fallback when MongoDB is unavailable, so Day 2 flow can still be tested locally.
+- Backend is Mongo-only and requires a reachable MONGODB_URI at startup.

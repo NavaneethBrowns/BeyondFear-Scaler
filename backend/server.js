@@ -10,6 +10,7 @@ import { requestLogger } from './src/middleware/requestLogger.js';
 // Import routes
 import authRoutes from './src/routes/auth.routes.js';
 import sessionRoutes from './src/routes/session.routes.js';
+import actionLogRoutes from './src/routes/actionLog.routes.js';
 import paymentRoutes from './src/routes/payment.routes.js';
 import messageRoutes from './src/routes/message.routes.js';
 
@@ -57,6 +58,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
+app.use('/api', actionLogRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/payments', paymentRoutes);
 
@@ -74,10 +76,7 @@ app.use(errorHandler);
 
 async function startServer() {
   try {
-    // Try to connect to MongoDB, but don't block server startup
-    connectDB().catch(err => {
-      console.warn('⚠️ MongoDB connection failed, running in memory mode:', err.message);
-    });
+    await connectDB();
 
     // Start server
     app.listen(PORT, () => {
@@ -85,7 +84,7 @@ async function startServer() {
       console.log(`Environment: ${process.env.NODE_ENV}`);
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error('❌ Failed to start server:', error.message);
     process.exit(1);
   }
 }

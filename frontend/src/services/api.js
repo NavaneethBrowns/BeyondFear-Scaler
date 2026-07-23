@@ -19,7 +19,10 @@ export const apiCall = async (endpoint, options = {}) => {
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.error || 'API Error');
+    const apiError = new Error(error.error || 'API Error');
+    apiError.status = response.status;
+    apiError.details = error;
+    throw apiError;
   }
 
   return response.json();
@@ -44,8 +47,8 @@ export const authAPI = {
 
 // Session API
 export const sessionAPI = {
-  create: () =>
-    apiCall('/sessions', { method: 'POST', body: JSON.stringify({}) }),
+  create: (data = {}) =>
+    apiCall('/sessions', { method: 'POST', body: JSON.stringify(data) }),
 
   list: () => apiCall('/sessions'),
 
@@ -54,6 +57,20 @@ export const sessionAPI = {
   update: (sessionId, data) =>
     apiCall(`/sessions/${sessionId}`, {
       method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  complete: (sessionId, fearIntensity) =>
+    apiCall(`/sessions/${sessionId}/complete`, {
+      method: 'PATCH',
+      body: JSON.stringify(
+        fearIntensity !== undefined ? { fearIntensity } : {}
+      ),
+    }),
+
+  updateIntensity: (sessionId, data) =>
+    apiCall(`/sessions/${sessionId}/intensity`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     }),
 

@@ -33,12 +33,11 @@
   
   // Subscription Status
   subscription: {
-    status: String,                 // "free" | "active" | "expired"
+    status: String,                 // "free" | "premium"
     planType: String,               // "monthly" | "annual" | "lifetime"
-    sessionsRemaining: Number,      // For free tier: 3, after payment: unlimited
     freeSessions: {
       used: Number,                 // How many free sessions used
-      total: Number,                // Free tier limit (3)
+      total: Number,                // Free tier limit (1)
     },
     paidSessions: {
       unlockDate: Date,             // When premium unlocked
@@ -126,6 +125,29 @@ db.users.createIndex({ "subscription.status": 1 });
   // Metadata
   sessionDuration: Number,          // Seconds
   keyInsights: [String],            // ["Root cause is perfectionism", "Direction: lead small feature"]
+}
+```
+
+**Action Logs Collection**
+
+```javascript
+{
+  _id: ObjectId,
+  userId: ObjectId,
+  sessionId: ObjectId,
+  title: String,
+  description: String,
+  actionType: String,             // "breathing" | "reflection" | "behavior-change" | "goal"
+  status: String,                 // "pending" | "in-progress" | "completed" | "skipped"
+  dueDate: Date,
+  completedAt: Date,
+  skippedAt: Date,
+  priority: String,               // "high" | "medium" | "low"
+  difficulty: String,             // "easy" | "medium" | "hard"
+  attempts: Number,
+  completionNotes: String,
+  createdAt: Date,
+  updatedAt: Date,
 }
 ```
 

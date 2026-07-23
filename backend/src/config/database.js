@@ -2,8 +2,12 @@ import mongoose from 'mongoose';
 
 export const connectDB = async () => {
   try {
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/beyondfear';
-    
+    const mongoUri = process.env.MONGODB_URI;
+
+    if (!mongoUri) {
+      throw new Error('MONGODB_URI is required');
+    }
+
     await mongoose.connect(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
@@ -12,7 +16,6 @@ export const connectDB = async () => {
     console.log('MongoDB connected successfully');
     return mongoose.connection;
   } catch (error) {
-    console.error('MongoDB connection error:', error.message);
     throw error;
   }
 };

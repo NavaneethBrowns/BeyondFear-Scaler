@@ -203,6 +203,12 @@ BeyondFear-Scaler/
 - `POST   /api/sessions/:id/messages` - Send message, get AI response
 - `PATCH  /api/sessions/:id/complete` - Mark session complete
 - `GET    /api/sessions`              - List user's sessions
+- Free tier includes 1 session; additional sessions require subscription.
+
+### Action Logs
+- `GET    /api/sessions/:sessionId/action-logs` - List tracked mini-actions
+- `POST   /api/sessions/:sessionId/action-logs` - Create an action log
+- `PATCH  /api/sessions/:sessionId/action-logs/:actionLogId` - Update action status
 
 ### Payments
 - `POST   /api/payments/create-order`   - Start payment

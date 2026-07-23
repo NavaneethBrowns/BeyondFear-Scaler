@@ -48,7 +48,7 @@ export const Homepage = ({ onNavigate, isAuthenticated, user, onLogout }) => {
         </div>
 
         <p className="hero-trust">
-          Private by design &nbsp;&middot;&nbsp; 3 free sessions &nbsp;&middot;&nbsp; No card required
+          Private by design &nbsp;&middot;&nbsp; 1 free session &nbsp;&middot;&nbsp; No card required
         </p>
       </section>
 

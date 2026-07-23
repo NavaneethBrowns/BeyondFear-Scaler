@@ -68,7 +68,7 @@ export const SignupPage = ({ onNavigate, onAuthSuccess, isAuthenticated, user, o
         <Card>
           <CardHeader>
             <h2>Create your account</h2>
-            <p>3 free sessions, no card required.</p>
+            <p>1 free session, no card required.</p>
           </CardHeader>
 
           <CardBody>

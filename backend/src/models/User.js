@@ -35,7 +35,11 @@ const userSchema = new mongoose.Schema(
     },
     subscription: {
       status: { type: String, enum: ['free', 'premium'], default: 'free' },
-      sessionsUsed: { type: Number, default: 0 },
+      planType: { type: String, enum: ['free', 'monthly', 'annual', 'lifetime'], default: 'free' },
+      freeSessions: {
+        used: { type: Number, default: 0 },
+        total: { type: Number, default: 1 },
+      },
       nextResetDate: Date,
       lastPaymentDate: Date,
     },

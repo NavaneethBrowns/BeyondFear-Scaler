@@ -1,8 +1,8 @@
 import express from 'express';
 import axios from 'axios';
 import { authMiddleware } from '../middleware/auth.js';
-import Session from '../models/Session.js';
-import User from '../models/User.js';
+import { appendMessageToSession, getSessionForUser, addKeyInsightsToSession } from '../services/session.store.js';
+import { createActionLogRecord } from '../services/actionLog.store.js';
 
 const router = express.Router();
 
@@ -26,7 +26,104 @@ Guidelines:
 - Use plain language (no clinical jargon)
 - Always end with a concrete action suggestion or reflection question
 
-Important: You are NOT a replacement for professional mental health care. If someone mentions crisis/self-harm, respond with empathy and encourage them to contact a mental health professional immediately.`;
+Important: You are NOT a replacement for professional mental health care. If someone mentions crisis/self-harm, respond with empathy and encourage them to contact a mental health professional immediately.
+
+Return valid JSON only in this shape:
+{
+  "reply": "short empathetic response",
+  "keyInsights": ["optional insight"],
+  "actionItems": [
+    {
+      "title": "small action step",
+      "description": "one-sentence detail",
+      "actionType": "reflection",
+      "priority": "medium",
+      "difficulty": "easy",
+      "dueDate": "ISO-8601 date string or null"
+    }
+  ]
+}
+
+If you cannot suggest an action, return an empty actionItems array.`;
+
+const DEFAULT_ACTION_ITEM = {
+  title: 'Write down one fear trigger',
+  description: 'Capture the specific moment or thought that made the fear feel strongest today.',
+  actionType: 'reflection',
+  priority: 'medium',
+  difficulty: 'easy',
+};
+
+const parseAssistantPayload = (text) => {
+  if (!text) {
+    return { reply: '', keyInsights: [], actionItems: [] };
+  }
+
+  const cleanedText = text.trim();
+  const jsonCandidate = cleanedText
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '');
+
+  try {
+    const parsed = JSON.parse(jsonCandidate);
+
+    if (parsed && typeof parsed === 'object') {
+      return {
+        reply: typeof parsed.reply === 'string' ? parsed.reply : cleanedText,
+        keyInsights: Array.isArray(parsed.keyInsights) ? parsed.keyInsights.filter(Boolean) : [],
+        actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems.filter(Boolean) : [],
+      };
+    }
+  } catch (error) {
+    // Fall through to text response.
+  }
+
+  return {
+    reply: cleanedText,
+    keyInsights: [],
+    actionItems: [],
+  };
+};
+
+const normalizeActionItems = (actionItems) => {
+  if (!Array.isArray(actionItems) || actionItems.length === 0) {
+    return [DEFAULT_ACTION_ITEM];
+  }
+
+  return actionItems.map((item) => ({
+    title: item.title || DEFAULT_ACTION_ITEM.title,
+    description: item.description || DEFAULT_ACTION_ITEM.description,
+    actionType: item.actionType || DEFAULT_ACTION_ITEM.actionType,
+    priority: item.priority || DEFAULT_ACTION_ITEM.priority,
+    difficulty: item.difficulty || DEFAULT_ACTION_ITEM.difficulty,
+    dueDate: item.dueDate || null,
+  }));
+};
+
+const persistActionLogs = async (sessionId, userId, actionItems) => {
+  const createdActionLogs = [];
+
+  for (const actionItem of actionItems) {
+    const actionLog = await createActionLogRecord({
+      userId,
+      sessionId,
+      title: actionItem.title,
+      description: actionItem.description,
+      actionType: actionItem.actionType,
+      status: 'pending',
+      dueDate: actionItem.dueDate ? new Date(actionItem.dueDate) : undefined,
+      priority: actionItem.priority,
+      difficulty: actionItem.difficulty,
+    });
+
+    if (actionLog) {
+      createdActionLogs.push(actionLog);
+    }
+  }
+
+  return createdActionLogs;
+};
 
 /**
  * POST /api/messages/send
@@ -41,33 +138,21 @@ router.post('/send', authMiddleware, async (req, res, next) => {
     }
 
     // Get session
-    const session = await Session.findOne({
-      _id: sessionId,
-      userId: req.user.userId,
-    });
+    const session = await getSessionForUser(sessionId, req.user.userId);
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Check free session limit
-    const user = await User.findById(req.user.userId);
-    if (user.subscription.status === 'free' && user.subscription.sessionsUsed >= 3) {
-      return res.status(402).json({
-        error: 'Session limit reached. Please upgrade to premium.',
-        sessionsUsed: user.subscription.sessionsUsed,
-        limit: 3,
-      });
-    }
-
     // Add user message to session
-    session.messages.push({
+    const sessionAfterUserMessage = await appendMessageToSession(sessionId, req.user.userId, {
       role: 'user',
       content: message,
+      timestamp: new Date(),
     });
 
     // Prepare messages for Claude API (last 10 messages for context)
-    const conversationHistory = session.messages.slice(-10).map(msg => ({
+    const conversationHistory = sessionAfterUserMessage.messages.slice(-10).map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
@@ -90,44 +175,54 @@ router.post('/send', authMiddleware, async (req, res, next) => {
         }
       );
 
-      const aiMessage = response.data.content[0].text;
+      const aiMessageText = response.data.content[0].text;
+      const parsedPayload = parseAssistantPayload(aiMessageText);
+      const replyText = parsedPayload.reply || 'I hear you. Let us work through this together.';
+      const actionItems = normalizeActionItems(parsedPayload.actionItems);
 
       // Add AI response to session
-      session.messages.push({
+      const sessionAfterAssistantMessage = await appendMessageToSession(sessionId, req.user.userId, {
         role: 'assistant',
-        content: aiMessage,
+        content: replyText,
+        timestamp: new Date(),
       });
 
-      // Save session
-      await session.save();
+      const createdActionLogs = await persistActionLogs(sessionId, req.user.userId, actionItems);
+
+      if (parsedPayload.keyInsights.length > 0) {
+        await addKeyInsightsToSession(sessionId, req.user.userId, parsedPayload.keyInsights);
+      }
 
       res.json({
-        message: aiMessage,
-        sessionId: session._id,
-        messagesCount: session.messages.length,
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: parsedPayload.keyInsights,
+        actionItems,
+        actionLogs: createdActionLogs,
       });
     } catch (apiError) {
       console.error('Claude API error:', apiError.response?.data || apiError.message);
 
       // Return mock response for development/testing
-      const mockResponse = `I hear you. That sounds like a challenging situation. 
+      const mockResponse = `I hear you. That sounds like a challenging situation. Could you tell me more about what triggered this feeling?`;
 
-Could you tell me more about what triggered this feeling? Sometimes understanding the root can help us identify patterns.
-
-For today, try this: Write down one specific moment that made you feel this way. Then share it when you're ready.`;
-
-      session.messages.push({
+      const sessionAfterAssistantMessage = await appendMessageToSession(sessionId, req.user.userId, {
         role: 'assistant',
         content: mockResponse,
+        timestamp: new Date(),
       });
 
-      await session.save();
+      const createdActionLogs = await persistActionLogs(sessionId, req.user.userId, [DEFAULT_ACTION_ITEM]);
 
       res.json({
         message: mockResponse,
-        sessionId: session._id,
-        messagesCount: session.messages.length,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
         isDevelopmentMode: true,
+        keyInsights: [],
+        actionItems: [DEFAULT_ACTION_ITEM],
+        actionLogs: createdActionLogs,
       });
     }
   } catch (error) {
@@ -143,17 +238,18 @@ router.post('/mock', authMiddleware, async (req, res, next) => {
   try {
     const { sessionId, message } = req.body;
 
-    const session = await Session.findOne({
-      _id: sessionId,
-      userId: req.user.userId,
-    });
+    const session = await getSessionForUser(sessionId, req.user.userId);
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
     // Add user message
-    session.messages.push({ role: 'user', content: message });
+    await appendMessageToSession(sessionId, req.user.userId, {
+      role: 'user',
+      content: message,
+      timestamp: new Date(),
+    });
 
     // Mock response based on keywords
     const mockResponses = {
@@ -163,16 +259,23 @@ router.post('/mock', authMiddleware, async (req, res, next) => {
       default: `I'm here to listen and help you move from awareness to action. What's on your mind today? Share as much or as little as you'd like.`,
     };
 
-    const keyword = Object.keys(mockResponses).find(key => message.toLowerCase().includes(key));
+    const keyword = Object.keys(mockResponses).find((key) => message.toLowerCase().includes(key));
     const aiMessage = mockResponses[keyword] || mockResponses.default;
 
-    session.messages.push({ role: 'assistant', content: aiMessage });
-    await session.save();
+    const sessionAfterAssistantMessage = await appendMessageToSession(sessionId, req.user.userId, {
+      role: 'assistant',
+      content: aiMessage,
+      timestamp: new Date(),
+    });
+
+    const createdActionLogs = await persistActionLogs(sessionId, req.user.userId, [DEFAULT_ACTION_ITEM]);
 
     res.json({
       message: aiMessage,
-      sessionId: session._id,
-      messagesCount: session.messages.length,
+      sessionId,
+      messagesCount: sessionAfterAssistantMessage.messages.length,
+      actionItems: [DEFAULT_ACTION_ITEM],
+      actionLogs: createdActionLogs,
     });
   } catch (error) {
     next(error);

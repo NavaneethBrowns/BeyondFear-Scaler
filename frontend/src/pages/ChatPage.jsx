@@ -3,21 +3,29 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Card, CardBody, CardHeader } from '../components/Card';
 import { Navbar } from '../components/Navbar';
-import { Send, Plus } from 'lucide-react';
-import { paymentAPI } from '../services/api';
+import { Send, Plus, PanelLeftClose, PanelLeftOpen, Shield } from 'lucide-react';
+import { messageAPI, paymentAPI, sessionAPI } from '../services/api';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
 const RAZORPAY_AMOUNT_PAISE = 29900;
 
 export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
   const [sessions, setSessions] = useState([]);
-  const [currentSession, setCurrentSession] = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [actionSummary, setActionSummary] = useState([]);
+  const [intensityScore, setIntensityScore] = useState('');
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState('');
   const [subscriptionStatus, setSubscriptionStatus] = useState('free');
+  const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const firstName = user?.displayName || user?.email?.split('@')[0] || 'there';
 
   useEffect(() => {
     const scriptExists = document.querySelector(`script[src="${RAZORPAY_SCRIPT_URL}"]`);
@@ -47,6 +55,77 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
 
     loadSubscriptionStatus();
   }, []);
+
+  useEffect(() => {
+    const loadSessions = async () => {
+      setSessionsLoading(true);
+      setErrorMessage('');
+
+      try {
+        const result = await sessionAPI.list();
+        const listedSessions = result?.sessions || [];
+        setSessions(listedSessions);
+        setCurrentSessionId(null);
+        setMessages([]);
+        setActionSummary([]);
+        setIntensityScore('');
+      } catch (error) {
+        setErrorMessage(error.message || 'Failed to load sessions');
+      } finally {
+        setSessionsLoading(false);
+      }
+    };
+
+    loadSessions();
+  }, []);
+
+  const loadSessionById = async (sessionId) => {
+    setErrorMessage('');
+    try {
+      const result = await sessionAPI.get(sessionId);
+      const session = result?.session;
+      if (!session) {
+        return;
+      }
+
+      setCurrentSessionId(session._id);
+      setMessages(session.messages || []);
+      setActionSummary([]);
+      setIntensityScore(
+        typeof session?.fearIntensity?.finalScore === 'number'
+          ? String(session.fearIntensity.finalScore)
+          : ''
+      );
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to load selected session');
+    }
+  };
+
+  const sendMessageToSession = async (sessionId, pendingMessage) => {
+    setLoading(true);
+    setErrorMessage('');
+
+    const userMessage = { role: 'user', content: pendingMessage, timestamp: new Date() };
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      const result = await messageAPI.send(sessionId, pendingMessage);
+
+      const aiResponse = {
+        role: 'assistant',
+        content: result?.message || 'I hear you. Let us take the next step together.',
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, aiResponse]);
+      await loadSessionById(sessionId);
+      setActionSummary(result?.actionItems || []);
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to send message');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleStartCheckout = async () => {
     if (subscriptionStatus === 'premium') {
@@ -121,44 +200,101 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     }
   };
 
-  const createNewSession = () => {
-    const newSession = {
-      id: 'session_' + Date.now(),
-      title: 'New Session - ' + new Date().toLocaleDateString(),
-      createdAt: new Date(),
-      messages: [],
-    };
-    setSessions([newSession, ...sessions]);
-    setCurrentSession(newSession.id);
-    setMessages([]);
+  const createNewSession = async () => {
+    setCreatingSession(true);
+    setErrorMessage('');
+    setPaymentMessage('');
+
+    try {
+      const result = await sessionAPI.create({
+        title: `Session ${new Date().toLocaleDateString()}`,
+      });
+      const session = result?.session;
+      if (!session) {
+        return;
+      }
+
+      setSessions((prev) => [session, ...prev]);
+      setCurrentSessionId(session._id);
+      setMessages([]);
+      setActionSummary([]);
+      setIntensityScore('');
+      setShowUpgradePrompt(false);
+      return session;
+    } catch (error) {
+      if (error.status === 402) {
+        setShowUpgradePrompt(true);
+        setPaymentMessage('Your free session is used. Upgrade to Premium to start another session.');
+      } else {
+        setErrorMessage(error.message || 'Failed to create a session');
+      }
+    } finally {
+      setCreatingSession(false);
+    }
+  };
+
+  const handleLandingSubmit = async (e) => {
+    e.preventDefault();
+
+    if (showUpgradePrompt) {
+      handleStartCheckout();
+      return;
+    }
+
+    const pendingMessage = input.trim();
+    const session = await createNewSession();
+
+    if (!session || !pendingMessage) {
+      return;
+    }
+
+    setInput('');
+    await sendMessageToSession(session._id, pendingMessage);
+  };
+
+  const handleIncognitoChat = async () => {
+    if (showUpgradePrompt) {
+      handleStartCheckout();
+      return;
+    }
+
+    await createNewSession();
   };
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !currentSession) return;
+    if (!input.trim() || !currentSessionId) return;
 
-    setLoading(true);
-    const userMessage = { role: 'user', content: input, timestamp: new Date() };
-    setMessages([...messages, userMessage]);
+    const pendingMessage = input;
     setInput('');
 
+    await sendMessageToSession(currentSessionId, pendingMessage);
+  };
+
+  const handleCompleteSession = async () => {
+    if (!currentSessionId) return;
+
+    const parsedScore = Number.parseInt(intensityScore, 10);
+    const score = Number.isFinite(parsedScore) ? parsedScore : undefined;
+    if (score !== undefined && (score < 1 || score > 10)) {
+      setErrorMessage('Intensity must be between 1 and 10');
+      return;
+    }
+
+    setErrorMessage('');
     try {
-      // Mock API call - will be replaced with real Claude API
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const aiResponse = {
-        role: 'assistant',
-        content: 'I hear you. That sounds challenging. Can you tell me more about what triggered this feeling today?',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, aiResponse]);
-    } finally {
-      setLoading(false);
+      await sessionAPI.complete(currentSessionId, score);
+      const refreshedList = await sessionAPI.list();
+      setSessions(refreshedList?.sessions || []);
+      await loadSessionById(currentSessionId);
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to complete session');
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+    <div className="aurora-bg">
+      <div className="aurora-mid" />
       <Navbar
         onLoginClick={() => onNavigate('login')}
         onSignupClick={() => onNavigate('signup')}
@@ -167,73 +303,139 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
         onLogout={onLogout}
       />
 
-      <div className="mx-auto max-w-7xl px-4 py-6 flex gap-6">
-        {/* Sidebar: Sessions */}
-        <div className="hidden md:block w-64 flex-shrink-0">
-          <Card>
+      <div className={`chat-workspace ${sidebarOpen ? 'chat-workspace-sidebar-open' : 'chat-workspace-sidebar-closed'}`}>
+        <aside className={`chat-sidebar-panel ${sidebarOpen ? '' : 'chat-sidebar-panel-collapsed'}`}>
+          <Card className="chat-sidebar-card">
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <h2 className="font-bold text-gray-900">Sessions</h2>
+              <div className="chat-sidebar-header">
+                {sidebarOpen && (
+                  <div>
+                    <h2 className="chat-sidebar-title">Chats</h2>
+                    <p className="chat-sidebar-subtitle">
+                      {sessions.length > 0 ? 'Pick up where you left off.' : 'Your conversations will appear here.'}
+                    </p>
+                  </div>
+                )}
                 <button
-                  onClick={createNewSession}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition"
+                  onClick={() => setSidebarOpen((prev) => !prev)}
+                  className="chat-icon-button"
+                  title={sidebarOpen ? 'Hide chats menu' : 'Show chats menu'}
                 >
-                  <Plus className="h-4 w-4" />
+                  {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
                 </button>
               </div>
             </CardHeader>
-            <CardBody className="p-0">
-              <div className="space-y-2">
-                {sessions.length === 0 ? (
-                  <button
-                    onClick={createNewSession}
-                    className="w-full px-4 py-3 text-left text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                  >
-                    + Start Your First Session
-                  </button>
+            {sidebarOpen && (
+            <CardBody className="chat-sidebar-body">
+              <div className="chat-session-list">
+                {sessionsLoading ? (
+                  <div className="chat-sidebar-empty">Loading chats...</div>
+                ) : sessions.length === 0 ? (
+                  <div className="chat-sidebar-empty">
+                    Use your free session to start the first conversation.
+                  </div>
                 ) : (
-                  sessions.map(session => (
+                  sessions.map((session) => (
                     <button
-                      key={session.id}
-                      onClick={() => {
-                        setCurrentSession(session.id);
-                        setMessages(session.messages || []);
-                      }}
-                      className={`w-full px-4 py-3 text-left text-sm rounded-lg transition ${
-                        currentSession === session.id
-                          ? 'bg-indigo-100 text-indigo-900 font-medium'
-                          : 'text-gray-700 hover:bg-gray-100'
+                      key={session._id}
+                      onClick={() => loadSessionById(session._id)}
+                      className={`chat-session-item ${
+                        currentSessionId === session._id
+                          ? 'chat-session-item-active'
+                          : ''
                       }`}
                     >
-                      <div className="truncate font-medium">{session.title}</div>
-                      <div className="text-xs opacity-70">
-                        {session.createdAt.toLocaleDateString()}
+                      <div className="chat-session-title">{session.title || session.fearTitle || 'Untitled Session'}</div>
+                      <div className="chat-session-meta">
+                        {session.createdAt ? new Date(session.createdAt).toLocaleDateString() : ''}
                       </div>
                     </button>
                   ))
                 )}
               </div>
             </CardBody>
+            )}
           </Card>
-        </div>
+        </aside>
 
-        {/* Main Chat Area */}
-        <div className="flex-1">
-          {!currentSession ? (
-            <Card className="h-96 flex items-center justify-center">
-              <CardBody className="text-center">
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">
-                  Welcome to BeyondFear
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Start a new session to begin your journey of identifying fears and taking action.
+        <div className="chat-main-panel">
+          {!currentSessionId ? (
+            <section className="chat-home">
+              <div className="chat-home-content">
+                <div className="chat-home-toolbar">
+                  {!sidebarOpen && (
+                    <button
+                      type="button"
+                      className="chat-home-menu-button"
+                      onClick={() => setSidebarOpen(true)}
+                      title="Show chats menu"
+                    >
+                      <PanelLeftOpen className="h-4 w-4" />
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="chat-home-incognito"
+                    onClick={handleIncognitoChat}
+                    title="Start an incognito chat"
+                    disabled={creatingSession || loading}
+                  >
+                    <Shield className="h-4 w-4" />
+                    <span className="chat-home-incognito-tooltip">Incognito chat</span>
+                  </button>
+                </div>
+
+                <p className="chat-home-eyebrow">
+                  {showUpgradePrompt ? 'Free session used' : '1 free session available'}
                 </p>
-                <div className="flex items-center justify-center gap-3 mb-5 flex-wrap">
+                <h1 className="chat-home-title">
+                  {showUpgradePrompt ? 'Ready for another conversation?' : `What\'s on your mind, ${firstName}?`}
+                </h1>
+                <p className="chat-home-subtitle">
+                  {showUpgradePrompt
+                    ? 'Upgrade to Premium to unlock more sessions and keep the momentum going.'
+                    : 'Start with one honest sentence. BeyondFear helps you turn fear into clarity and a small next step.'}
+                </p>
+
+                {errorMessage && (
+                  <p className="chat-home-alert chat-home-alert-error">{errorMessage}</p>
+                )}
+                {paymentMessage && (
+                  <p className="chat-home-alert">{paymentMessage}</p>
+                )}
+
+                {!showUpgradePrompt && (
+                  <form className="chat-home-composer" onSubmit={handleLandingSubmit}>
+                    <span className="chat-home-composer-icon">
+                      <Plus className="h-4 w-4" />
+                    </span>
+                    <input
+                      type="text"
+                      className="chat-home-input"
+                      placeholder="Talk through a fear, a decision, or something you keep avoiding..."
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      disabled={creatingSession || loading}
+                    />
+                    <Button
+                      type="submit"
+                      variant="action"
+                      size="md"
+                      className="chat-home-submit"
+                      disabled={creatingSession || loading}
+                    >
+                      {creatingSession || loading ? 'Starting...' : 'Try Free Session'}
+                    </Button>
+                  </form>
+                )}
+
+                <div className="chat-home-actions">
                   <Button
-                    variant="secondary"
+                    variant={showUpgradePrompt ? 'action' : 'secondary'}
                     size="md"
                     onClick={handleStartCheckout}
-                    disabled={paymentLoading}
+                    disabled={paymentLoading || subscriptionStatus === 'premium'}
                   >
                     {subscriptionStatus === 'premium'
                       ? 'Premium Active'
@@ -242,20 +444,28 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
                         : 'Upgrade to Premium'}
                   </Button>
                 </div>
-                {paymentMessage && (
-                  <p className="text-sm text-gray-700 mb-4">{paymentMessage}</p>
-                )}
-                <Button
-                  variant="action"
-                  size="lg"
-                  onClick={createNewSession}
-                >
-                  Start First Session
-                </Button>
-              </CardBody>
-            </Card>
+
+                <p className="chat-home-note">
+                  {showUpgradePrompt
+                    ? 'Premium unlocks additional guided sessions.'
+                    : 'Use the free session to see how BeyondFear guides one conversation from insight to action.'}
+                </p>
+              </div>
+            </section>
           ) : (
             <div className="flex flex-col h-96 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+              {errorMessage && (
+                <div className="px-4 py-2 text-sm bg-red-50 text-red-700 border-b border-red-100">
+                  {errorMessage}
+                </div>
+              )}
+
+              {actionSummary.length > 0 && (
+                <div className="px-4 py-2 text-xs bg-indigo-50 text-indigo-900 border-b border-indigo-100">
+                  <strong>Suggested actions:</strong> {actionSummary.map((item) => item.title).join(', ')}
+                </div>
+              )}
+
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {messages.length === 0 ? (
@@ -303,6 +513,21 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
               </div>
 
               {/* Input */}
+              <div className="px-4 py-2 border-t border-gray-200 flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={intensityScore}
+                  onChange={(e) => setIntensityScore(e.target.value)}
+                  placeholder="Final intensity (1-10)"
+                  className="w-44"
+                />
+                <Button variant="outline" size="sm" onClick={handleCompleteSession}>
+                  Complete Session
+                </Button>
+              </div>
+
               <form onSubmit={sendMessage} className="border-t border-gray-200 p-4 flex gap-2">
                 <Input
                   type="text"
