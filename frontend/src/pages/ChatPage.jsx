@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { Card, CardBody, CardHeader } from '../components/Card';
 import { Navbar } from '../components/Navbar';
 import { Send, Plus, PanelLeftClose, PanelLeftOpen, Shield } from 'lucide-react';
 import { messageAPI, paymentAPI, sessionAPI } from '../services/api';
+import logo from '../assets/beyondfear-logo.svg';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
 const RAZORPAY_AMOUNT_PAISE = 29900;
@@ -13,7 +13,8 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [landingInput, setLandingInput] = useState('');
+  const [chatInput, setChatInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
@@ -26,6 +27,11 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const firstName = user?.displayName || user?.email?.split('@')[0] || 'there';
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
 
   useEffect(() => {
     const scriptExists = document.querySelector(`script[src="${RAZORPAY_SCRIPT_URL}"]`);
@@ -219,6 +225,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
       setMessages([]);
       setActionSummary([]);
       setIntensityScore('');
+      setChatInput('');
       setShowUpgradePrompt(false);
       return session;
     } catch (error) {
@@ -241,14 +248,14 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
       return;
     }
 
-    const pendingMessage = input.trim();
+    const pendingMessage = landingInput.trim();
     const session = await createNewSession();
 
     if (!session || !pendingMessage) {
       return;
     }
 
-    setInput('');
+    setLandingInput('');
     await sendMessageToSession(session._id, pendingMessage);
   };
 
@@ -263,12 +270,21 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !currentSessionId) return;
+    if (!chatInput.trim() || !currentSessionId) return;
 
-    const pendingMessage = input;
-    setInput('');
+    const pendingMessage = chatInput;
+    setChatInput('');
 
     await sendMessageToSession(currentSessionId, pendingMessage);
+  };
+
+  const handleChatComposerKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!loading && chatInput.trim()) {
+        sendMessage(e);
+      }
+    }
   };
 
   const handleCompleteSession = async () => {
@@ -296,6 +312,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     <div className="aurora-bg">
       <div className="aurora-mid" />
       <Navbar
+        onBrandClick={() => onNavigate('home')}
         onLoginClick={() => onNavigate('login')}
         onSignupClick={() => onNavigate('signup')}
         isAuthenticated={isAuthenticated}
@@ -303,89 +320,78 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
         onLogout={onLogout}
       />
 
-      <div className={`chat-workspace ${sidebarOpen ? 'chat-workspace-sidebar-open' : 'chat-workspace-sidebar-closed'}`}>
-        <aside className={`chat-sidebar-panel ${sidebarOpen ? '' : 'chat-sidebar-panel-collapsed'}`}>
-          <Card className="chat-sidebar-card">
-            <CardHeader>
-              <div className="chat-sidebar-header">
-                {sidebarOpen && (
-                  <div>
-                    <h2 className="chat-sidebar-title">Chats</h2>
-                    <p className="chat-sidebar-subtitle">
-                      {sessions.length > 0 ? 'Pick up where you left off.' : 'Your conversations will appear here.'}
-                    </p>
-                  </div>
-                )}
-                <button
-                  onClick={() => setSidebarOpen((prev) => !prev)}
-                  className="chat-icon-button"
-                  title={sidebarOpen ? 'Hide chats menu' : 'Show chats menu'}
-                >
-                  {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
-                </button>
-              </div>
-            </CardHeader>
-            {sidebarOpen && (
-            <CardBody className="chat-sidebar-body">
-              <div className="chat-session-list">
-                {sessionsLoading ? (
-                  <div className="chat-sidebar-empty">Loading chats...</div>
-                ) : sessions.length === 0 ? (
-                  <div className="chat-sidebar-empty">
-                    Use your free session to start the first conversation.
-                  </div>
-                ) : (
-                  sessions.map((session) => (
-                    <button
-                      key={session._id}
-                      onClick={() => loadSessionById(session._id)}
-                      className={`chat-session-item ${
-                        currentSessionId === session._id
-                          ? 'chat-session-item-active'
-                          : ''
-                      }`}
-                    >
-                      <div className="chat-session-title">{session.title || session.fearTitle || 'Untitled Session'}</div>
-                      <div className="chat-session-meta">
-                        {session.createdAt ? new Date(session.createdAt).toLocaleDateString() : ''}
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </CardBody>
-            )}
-          </Card>
+      <main className={`portfolio-page-shell portfolio-chat-shell ${sidebarOpen ? 'portfolio-chat-shell-open' : 'portfolio-chat-shell-collapsed'}`}>
+        <aside className={`portfolio-chat-sidebar ${sidebarOpen ? '' : 'portfolio-chat-sidebar-collapsed'}`}>
+          <div className="chat-sidebar-shell">
+            <div className="chat-sidebar-top">
+              <button
+                onClick={() => setSidebarOpen((prev) => !prev)}
+                className="chat-icon-button"
+                title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              >
+                {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+              </button>
+              {sidebarOpen && <img src={logo} alt="BeyondFear" className="chat-sidebar-logo" />}
+            </div>
+
+            <button
+              onClick={createNewSession}
+              className="chat-new-chat-btn"
+              disabled={creatingSession}
+              title="Start new chat"
+            >
+              <Plus className="h-4 w-4" />
+              {sidebarOpen && <span>{creatingSession ? 'Creating...' : 'New chat'}</span>}
+            </button>
+
+            <button
+              onClick={handleIncognitoChat}
+              className="chat-incognito-btn"
+              disabled={creatingSession || loading}
+              title="Start incognito chat"
+            >
+              <Shield className="h-4 w-4" />
+              {sidebarOpen && <span>Incognito chat</span>}
+            </button>
+
+            <div className="chat-sidebar-divider" />
+
+            <div className="chat-session-list">
+              {sessionsLoading ? (
+                <div className="chat-sidebar-empty">Loading chats...</div>
+              ) : sessions.length === 0 ? (
+                <div className="chat-sidebar-empty">
+                  {sidebarOpen ? 'No chats yet. Start your first one.' : '...'}
+                </div>
+              ) : (
+                sessions.map((session) => (
+                  <button
+                    key={session._id}
+                    onClick={() => loadSessionById(session._id)}
+                    className={`chat-session-item ${currentSessionId === session._id ? 'chat-session-item-active' : ''}`}
+                    title={session.title || session.fearTitle || 'Untitled Session'}
+                  >
+                    {sidebarOpen ? (
+                      <>
+                        <div className="chat-session-title">{session.title || session.fearTitle || 'Untitled Session'}</div>
+                        <div className="chat-session-meta">
+                          {session.createdAt ? new Date(session.createdAt).toLocaleDateString() : ''}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="chat-session-dot" />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </aside>
 
-        <div className="chat-main-panel">
+        <section className="portfolio-chat-main">
           {!currentSessionId ? (
-            <section className="chat-home">
-              <div className="chat-home-content">
-                <div className="chat-home-toolbar">
-                  {!sidebarOpen && (
-                    <button
-                      type="button"
-                      className="chat-home-menu-button"
-                      onClick={() => setSidebarOpen(true)}
-                      title="Show chats menu"
-                    >
-                      <PanelLeftOpen className="h-4 w-4" />
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    className="chat-home-incognito"
-                    onClick={handleIncognitoChat}
-                    title="Start an incognito chat"
-                    disabled={creatingSession || loading}
-                  >
-                    <Shield className="h-4 w-4" />
-                    <span className="chat-home-incognito-tooltip">Incognito chat</span>
-                  </button>
-                </div>
-
+            <section className="portfolio-chat-home">
+              <div className="portfolio-chat-home-inner portfolio-card">
                 <p className="chat-home-eyebrow">
                   {showUpgradePrompt ? 'Free session used' : '1 free session available'}
                 </p>
@@ -414,8 +420,8 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
                       type="text"
                       className="chat-home-input"
                       placeholder="Talk through a fear, a decision, or something you keep avoiding..."
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      value={landingInput}
+                      onChange={(e) => setLandingInput(e.target.value)}
                       disabled={creatingSession || loading}
                     />
                     <Button
@@ -453,28 +459,48 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
               </div>
             </section>
           ) : (
-            <div className="flex flex-col h-96 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <section className="portfolio-chat-thread portfolio-card">
+              <header className="chat-thread-header">
+                <div>
+                  <h2 className="chat-thread-title">
+                    {sessions.find((session) => session._id === currentSessionId)?.title || 'Active conversation'}
+                  </h2>
+                  <p className="chat-thread-subtitle">Stay with one fear at a time. Shift+Enter adds a new line.</p>
+                </div>
+                <div className="chat-thread-complete">
+                  <Input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={intensityScore}
+                    onChange={(e) => setIntensityScore(e.target.value)}
+                    placeholder="Final intensity"
+                    className="chat-intensity-input"
+                  />
+                  <Button variant="outline" size="sm" onClick={handleCompleteSession}>
+                    Complete
+                  </Button>
+                </div>
+              </header>
+
               {errorMessage && (
-                <div className="px-4 py-2 text-sm bg-red-50 text-red-700 border-b border-red-100">
+                <div className="chat-thread-error">
                   {errorMessage}
                 </div>
               )}
 
               {actionSummary.length > 0 && (
-                <div className="px-4 py-2 text-xs bg-indigo-50 text-indigo-900 border-b border-indigo-100">
+                <div className="chat-thread-actions">
                   <strong>Suggested actions:</strong> {actionSummary.map((item) => item.title).join(', ')}
                 </div>
               )}
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="chat-thread-messages">
                 {messages.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center">
-                    <div className="text-center">
-                      <h4 className="font-semibold text-gray-900 mb-2">
-                        Start Your Journey
-                      </h4>
-                      <p className="text-sm text-gray-600 max-w-sm">
+                  <div className="chat-thread-empty">
+                    <div className="chat-thread-empty-inner">
+                      <h4 className="chat-thread-empty-title">Start this conversation</h4>
+                      <p className="chat-thread-empty-subtitle">
                         Share what's on your mind. What fear or limiting belief would you like to explore today?
                       </p>
                     </div>
@@ -483,25 +509,20 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
                   messages.map((msg, idx) => (
                     <div
                       key={idx}
-                      className={`flex ${
-                        msg.role === 'user' ? 'justify-end' : 'justify-start'
-                      }`}
+                      className={`chat-message-row ${msg.role === 'user' ? 'chat-message-row-user' : 'chat-message-row-assistant'}`}
                     >
                       <div
-                        className={`max-w-xs px-4 py-2 rounded-lg ${
-                          msg.role === 'user'
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-gray-200 text-gray-900'
-                        }`}
+                        className={`chat-message-bubble ${msg.role === 'user' ? 'chat-message-user' : 'chat-message-assistant'}`}
                       >
-                        <p className="text-sm">{msg.content}</p>
+                        <p className="chat-message-text">{msg.content}</p>
                       </div>
                     </div>
                   ))
                 )}
+
                 {loading && (
-                  <div className="flex justify-start">
-                    <div className="bg-gray-200 text-gray-900 px-4 py-2 rounded-lg">
+                  <div className="chat-message-row chat-message-row-assistant">
+                    <div className="chat-message-bubble chat-message-assistant">
                       <div className="flex gap-1">
                         <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" />
                         <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
@@ -510,46 +531,32 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
-              {/* Input */}
-              <div className="px-4 py-2 border-t border-gray-200 flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={intensityScore}
-                  onChange={(e) => setIntensityScore(e.target.value)}
-                  placeholder="Final intensity (1-10)"
-                  className="w-44"
-                />
-                <Button variant="outline" size="sm" onClick={handleCompleteSession}>
-                  Complete Session
-                </Button>
-              </div>
-
-              <form onSubmit={sendMessage} className="border-t border-gray-200 p-4 flex gap-2">
-                <Input
-                  type="text"
+              <form onSubmit={sendMessage} className="chat-thread-composer">
+                <textarea
                   placeholder="Share what's on your mind..."
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleChatComposerKeyDown}
                   disabled={loading}
-                  className="flex-1"
+                  className="chat-thread-textarea"
+                  rows={2}
                 />
                 <Button
                   type="submit"
                   variant="primary"
                   size="md"
-                  disabled={loading || !input.trim()}
+                  disabled={loading || !chatInput.trim()}
                 >
                   <Send className="h-4 w-4" />
                 </Button>
               </form>
-            </div>
+            </section>
           )}
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 };

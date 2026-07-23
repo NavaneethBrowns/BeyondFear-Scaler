@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, LogOut } from 'lucide-react';
 import { Button } from './Button';
+import logo from '../assets/beyondfear-logo.svg';
 
 export const Navbar = ({
+  onBrandClick,
   onLoginClick,
   onSignupClick,
   isAuthenticated = false,
@@ -38,10 +40,9 @@ export const Navbar = ({
   return (
     <nav className="navbar-glass">
       <div className="navbar-content">
-        <div className="navbar-brand">
-          <div className="navbar-brand-icon">B</div>
-          <span>BeyondFear</span>
-        </div>
+        <button type="button" className="navbar-brand" onClick={onBrandClick}>
+          <img src={logo} alt="BeyondFear" className="navbar-brand-logo" />
+        </button>
         <div className="navbar-actions">
           {!isAuthenticated ? (
             <>
@@ -62,6 +63,7 @@ export const Navbar = ({
                 ) : (
                   <span className="profile-avatar-fallback">{avatarInitial}</span>
                 )}
+                <span className="profile-menu-label">{avatarInitial}</span>
                 <ChevronDown size={14} />
               </button>
 

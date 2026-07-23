@@ -52,6 +52,7 @@ export const SignupPage = ({ onNavigate, onAuthSuccess, isAuthenticated, user, o
   return (
     <div className="auth-page">
       <Navbar
+        onBrandClick={() => onNavigate('home')}
         onLoginClick={() => onNavigate('login')}
         onSignupClick={() => {}}
         isAuthenticated={isAuthenticated}

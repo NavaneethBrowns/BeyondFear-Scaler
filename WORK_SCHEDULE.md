@@ -5,8 +5,8 @@ Use this file as the running checklist for implementation. Tick items off as the
 ## Where We Stand
 
 - Current date: 2026-07-23
-- Overall status: Day 1 through Day 5 are complete. Frontend design system, auth flow, session persistence, backend chat/action-log flow, and frontend integration with session/message APIs are in place.
-- Immediate next step: Day 6 chat input and message capture polish.
+- Overall status: Day 1 through Day 7 are complete. Frontend design system, auth flow, session persistence, backend chat/action-log flow, frontend integration with session/message APIs, and conversation thread flow are in place.
+- Immediate next step: Day 8 backend payments hardening and Day 9 frontend unlock edge-case pass.
 
 ## Status Key
 
@@ -22,8 +22,8 @@ Use this file as the running checklist for implementation. Tick items off as the
 - [x] Day 3 - Backend sessions and persistence
 - [x] Day 4 - Backend chat logic and response flow
 - [x] Day 5 - App routing and frontend integration
-- [ ] Day 6 - Chat input and message capture
-- [ ] Day 7 - Conversation thread and first full user flow
+- [x] Day 6 - Chat input and message capture
+- [x] Day 7 - Conversation thread and first full user flow
 
 ### Week 2: Payments, Polish, and Delivery
 

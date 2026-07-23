@@ -4,6 +4,7 @@ import { SignupPage } from './pages/SignupPage';
 import { LoginPage } from './pages/LoginPage';
 import { ChatPage } from './pages/ChatPage';
 import { authAPI } from './services/api';
+import { ThreeBackdrop } from './components/ThreeBackdrop';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('home');
@@ -80,45 +81,52 @@ function App() {
   };
 
   if (authLoading) {
-    return <div className="aurora-bg" />;
+    return (
+      <div className="app-shell">
+        <ThreeBackdrop scene="home" />
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      {currentPage === 'home' && (
-        <Homepage
-          onNavigate={handleNavigate}
-          isAuthenticated={isAuthenticated}
-          user={user}
-          onLogout={handleLogout}
-        />
-      )}
-      {currentPage === 'signup' && (
-        <SignupPage
-          onNavigate={handleNavigate}
-          onAuthSuccess={handleAuthSuccess}
-          isAuthenticated={isAuthenticated}
-          user={user}
-          onLogout={handleLogout}
-        />
-      )}
-      {currentPage === 'login' && (
-        <LoginPage
-          onNavigate={handleNavigate}
-          onAuthSuccess={handleAuthSuccess}
-          isAuthenticated={isAuthenticated}
-          user={user}
-          onLogout={handleLogout}
-        />
-      )}
-      {currentPage === 'chat' && isAuthenticated && (
-        <ChatPage
-          onNavigate={handleNavigate}
-          onLogout={handleLogout}
-          isAuthenticated={isAuthenticated}
-          user={user}
-        />
-      )}
+    <div className="app-shell">
+      <ThreeBackdrop scene={currentPage} />
+      <div className="app-content min-h-screen bg-white">
+        {currentPage === 'home' && (
+          <Homepage
+            onNavigate={handleNavigate}
+            isAuthenticated={isAuthenticated}
+            user={user}
+            onLogout={handleLogout}
+          />
+        )}
+        {currentPage === 'signup' && (
+          <SignupPage
+            onNavigate={handleNavigate}
+            onAuthSuccess={handleAuthSuccess}
+            isAuthenticated={isAuthenticated}
+            user={user}
+            onLogout={handleLogout}
+          />
+        )}
+        {currentPage === 'login' && (
+          <LoginPage
+            onNavigate={handleNavigate}
+            onAuthSuccess={handleAuthSuccess}
+            isAuthenticated={isAuthenticated}
+            user={user}
+            onLogout={handleLogout}
+          />
+        )}
+        {currentPage === 'chat' && isAuthenticated && (
+          <ChatPage
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+            isAuthenticated={isAuthenticated}
+            user={user}
+          />
+        )}
+      </div>
     </div>
   );
 }
