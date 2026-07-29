@@ -1,15 +1,20 @@
 import express from 'express';
-import axios from 'axios';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { authMiddleware } from '../middleware/auth.js';
 import { appendMessageToSession, getSessionForUser, addKeyInsightsToSession } from '../services/session.store.js';
 import { createActionLogRecord } from '../services/actionLog.store.js';
 
 const router = express.Router();
 
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
-// System prompt for Claude - guides AI behavior with safety + action messaging
+const getGeminiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+  return new GoogleGenerativeAI(apiKey);
+};
+
+// System prompt - guides AI behavior with safety + action messaging
 const SYSTEM_PROMPT = `You are BeyondFear, a supportive AI companion designed to help people identify fear-based patterns and turn awareness into action.
 
 Your core purpose:
@@ -158,24 +163,30 @@ router.post('/send', authMiddleware, async (req, res, next) => {
     }));
 
     try {
-      // Call Claude API
-      const response = await axios.post(
-        CLAUDE_API_URL,
-        {
-          model: CLAUDE_MODEL,
-          max_tokens: 1024,
-          system: SYSTEM_PROMPT,
-          messages: conversationHistory,
-        },
-        {
-          headers: {
-            'x-api-key': process.env.CLAUDE_API_KEY,
-            'anthropic-version': '2023-06-01',
-          },
-        }
-      );
+      // Call Gemini API
+      const genAI = getGeminiClient();
+      const model = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        systemInstruction: SYSTEM_PROMPT,
+      });
 
-      const aiMessageText = response.data.content[0].text;
+      // Gemini uses alternating user/model roles (no system in history)
+      const geminiHistory = conversationHistory.slice(0, -1).map((msg) => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      }));
+
+      const chat = model.startChat({
+        history: geminiHistory,
+        generationConfig: {
+          maxOutputTokens: 1024,
+          temperature: 0.7,
+        },
+      });
+
+      const lastMessage = conversationHistory[conversationHistory.length - 1].content;
+      const result = await chat.sendMessage(lastMessage);
+      const aiMessageText = result.response.text();
       const parsedPayload = parseAssistantPayload(aiMessageText);
       const replyText = parsedPayload.reply || 'I hear you. Let us work through this together.';
       const actionItems = normalizeActionItems(parsedPayload.actionItems);
@@ -202,7 +213,7 @@ router.post('/send', authMiddleware, async (req, res, next) => {
         actionLogs: createdActionLogs,
       });
     } catch (apiError) {
-      console.error('Claude API error:', apiError.response?.data || apiError.message);
+      console.error('Gemini API error:', apiError.message || apiError);
 
       // Return mock response for development/testing
       const mockResponse = `I hear you. That sounds like a challenging situation. Could you tell me more about what triggered this feeling?`;
