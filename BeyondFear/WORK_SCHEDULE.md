@@ -4,9 +4,9 @@ Use this file as the running checklist for implementation. Tick items off as the
 
 ## Where We Stand
 
-- Current date: 2026-07-29
-- Overall status: Day 1 through Day 8 are complete. Frontend design system, auth flow, session persistence, backend chat/action-log flow, frontend integration with session/message APIs, conversation thread flow, and backend payment hardening are complete.
-- Immediate next step: Day 9 frontend payments and unlock flow (Razorpay SDK integration in Chat page).
+- Current date: 2026-07-23
+- Overall status: Day 1 through Day 7 are complete. Frontend design system, auth flow, session persistence, backend chat/action-log flow, frontend integration with session/message APIs, and conversation thread flow are in place.
+- Immediate next step: Day 8 backend payments hardening and Day 9 frontend unlock edge-case pass.
 
 ## Status Key
 
@@ -27,7 +27,7 @@ Use this file as the running checklist for implementation. Tick items off as the
 
 ### Week 2: Payments, Polish, and Delivery
 
-- [x] Day 8 - Backend payments
+- [ ] Day 8 - Backend payments
 - [ ] Day 9 - Frontend payments and unlock flow
 - [ ] Day 10 - Dashboard and progress views
 - [ ] Day 11 - End-to-end testing
@@ -42,34 +42,47 @@ Use this file as the running checklist for implementation. Tick items off as the
 - [x] Homepage reframed for dharmic direction-finding (not therapy)
 - [x] Login and signup pages updated to match the new design system
 - [x] Navbar updated with the aurora visual language
-- [x] Backend payments: Razorpay integration with signature verification
-- [x] Payment tracking: Payment model with transaction audit logs
-- [x] Pricing tiers: 3 plans (₹199/month, ₹499/quarter, ₹799/year)
-- [x] Session limits: Enforcement at route level
-- [x] Free tier: 1 session/month with auto-reset logic
-- [x] Subscription expiry: Auto-downgrade premium to free when expired
 
 ## Next Build Steps
 
-### Day 9: Frontend Payments & Unlock Flow
+### Core App Flow
 
-- [ ] Create Payment/Pricing modal component
-- [ ] Integrate Razorpay SDK in Chat page
-- [ ] Handle payment success callback
-- [ ] Handle payment failure callback  
-- [ ] Show "Upgrade to Premium" CTA when limit hit
-- [ ] Display subscription status in sidebar
-- [ ] Show session remaining badge
-- [ ] Unlock animation when premium activated
+- [ ] Build the ChatPage conversation UI
+- [ ] Add message history and input handling
+- [ ] Connect the chat UI to the backend chat endpoint
+- [ ] Add loading, error, and empty states
 
-### Day 10-14: Polish, Testing, Deployment
+### Authentication
 
-- [ ] Dashboard/progress views
-- [ ] End-to-end payment flow testing
-- [ ] Mobile responsiveness pass
-- [ ] Loading states and edge cases
-- [ ] Deployment to staging/production
-- [ ] Final verification and sign-off
+- [x] Add auth context and token storage
+- [x] Persist login state across refreshes
+- [x] Protect authenticated routes
+
+### Sessions
+
+- [ ] Add session persistence with localStorage
+- [ ] Sync session history with the API
+- [ ] Add session list or archive view
+
+### Account Pages
+
+- [ ] Create ProfilePage
+- [ ] Create SettingsPage
+- [ ] Add account and privacy controls
+
+### Backend API
+
+- [ ] Implement POST /chat
+- [ ] Implement GET /sessions
+- [ ] Add any missing session or auth routes
+- [ ] Wire request validation and error handling
+
+### Polish and Validation
+
+- [ ] Test mobile layout on small screens
+- [ ] Verify conversation flow end to end
+- [ ] Fix UI edge cases and spacing issues
+- [ ] Confirm production build succeeds
 
 ## Working Notes
 
