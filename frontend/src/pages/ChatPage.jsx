@@ -33,12 +33,24 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [selectedPlanType, setSelectedPlanType] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [menuOpenSessionId, setMenuOpenSessionId] = useState(null);
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, sessionId: null });
   const firstName = user?.displayName || user?.email?.split('@')[0] || 'there';
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  useEffect(() => {
+    const closeMenus = () => {
+      setMenuOpenSessionId(null);
+      setContextMenu({ visible: false, x: 0, y: 0, sessionId: null });
+    };
+
+    window.addEventListener('click', closeMenus);
+    return () => window.removeEventListener('click', closeMenus);
+  }, []);
 
   useEffect(() => {
     const scriptExists = document.querySelector(`script[src="${RAZORPAY_SCRIPT_URL}"]`);
@@ -248,7 +260,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     }
   };
 
-  const createNewSession = async () => {
+  const createNewSession = async ({ incognito = false } = {}) => {
     setCreatingSession(true);
     setErrorMessage('');
     setPaymentMessage('');
@@ -256,6 +268,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     try {
       const result = await sessionAPI.create({
         title: `Session ${new Date().toLocaleDateString()}`,
+        incognito,
       });
       const session = result?.session;
       if (!session) {
@@ -312,7 +325,24 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
       return;
     }
 
-    await createNewSession();
+    if (subscriptionStatus !== 'premium') {
+      setPaymentMessage('Incognito chat is a premium feature. Upgrade to continue.');
+      setShowUpgradePrompt(true);
+      openPaymentModal();
+      return;
+    }
+
+    setPaymentMessage('');
+    setErrorMessage('');
+    setShowUpgradePrompt(false);
+
+    const session = await createNewSession({ incognito: true });
+
+    if (!session) {
+      setPaymentMessage('You are on the free tier. Upgrade to Premium to start a new chat.');
+      setShowUpgradePrompt(true);
+      openPaymentModal();
+    }
   };
 
   const sendMessage = async (e) => {
@@ -332,6 +362,64 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
         sendMessage(e);
       }
     }
+  };
+
+  const handleRenameSession = async (sessionId) => {
+    const currentSession = sessions.find((item) => item._id === sessionId);
+    const nextTitle = window.prompt('Rename chat', currentSession?.title || currentSession?.fearTitle || 'Untitled Session');
+
+    if (!nextTitle || !nextTitle.trim()) {
+      return;
+    }
+
+    try {
+      const result = await sessionAPI.update(sessionId, { title: nextTitle.trim() });
+      const updatedSession = result?.session;
+      if (!updatedSession) {
+        return;
+      }
+
+      setSessions((prev) => prev.map((item) => (item._id === sessionId ? { ...item, ...updatedSession } : item)));
+      setMenuOpenSessionId(null);
+      setContextMenu({ visible: false, x: 0, y: 0, sessionId: null });
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to rename chat');
+    }
+  };
+
+  const handleDeleteSession = async (sessionId) => {
+    const confirmed = window.confirm('Delete this chat?');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await sessionAPI.delete(sessionId);
+      const refreshedSessions = sessions.filter((item) => item._id !== sessionId);
+      setSessions(refreshedSessions);
+
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null);
+        setMessages([]);
+        setActionSummary([]);
+        setIntensityScore('');
+      }
+      setMenuOpenSessionId(null);
+      setContextMenu({ visible: false, x: 0, y: 0, sessionId: null });
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to delete chat');
+    }
+  };
+
+  const openContextMenu = (event, sessionId) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      sessionId,
+    });
   };
 
   const handleCompleteSession = async () => {
@@ -425,26 +513,127 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
                 </div>
               ) : (
                 sessions.map((session) => (
-                  <button
+                  <div
                     key={session._id}
                     onClick={() => loadSessionById(session._id)}
+                    onContextMenu={(event) => openContextMenu(event, session._id)}
                     className={`chat-session-item ${currentSessionId === session._id ? 'chat-session-item-active' : ''}`}
                     title={session.title || session.fearTitle || 'Untitled Session'}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        loadSessionById(session._id);
+                      }
+                    }}
                   >
                     {sidebarOpen ? (
                       <>
                         <div className="chat-session-title">{session.title || session.fearTitle || 'Untitled Session'}</div>
-                        <div className="chat-session-meta">
-                          {session.createdAt ? new Date(session.createdAt).toLocaleDateString() : ''}
-                        </div>
                       </>
                     ) : (
                       <div className="chat-session-dot" />
                     )}
-                  </button>
+
+                    {sidebarOpen && subscriptionStatus === 'premium' ? (
+                      <span className="chat-session-menu-wrap">
+                        <button
+                          type="button"
+                          className="chat-session-menu-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setMenuOpenSessionId((prev) => (prev === session._id ? null : session._id));
+                          }}
+                          aria-label="Open chat actions"
+                        >
+                          ⋯
+                        </button>
+
+                        {menuOpenSessionId === session._id ? (
+                          <span className="chat-session-menu-dropdown">
+                            <button
+                              type="button"
+                              className="chat-session-menu-item"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleRenameSession(session._id);
+                              }}
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              className="chat-session-menu-item"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteSession(session._id);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </div>
                 ))
               )}
             </div>
+
+            {contextMenu.visible && contextMenu.sessionId ? (
+              <div
+                className="chat-session-context-menu"
+                style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="chat-session-menu-item"
+                  onClick={() => {
+                    if (subscriptionStatus === 'premium') {
+                      handleRenameSession(contextMenu.sessionId);
+                      return;
+                    }
+
+                    setContextMenu({ visible: false, x: 0, y: 0, sessionId: null });
+                    setPaymentMessage('Rename is a premium feature. Upgrade to continue.');
+                    openPaymentModal();
+                  }}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className="chat-session-menu-item"
+                  onClick={() => {
+                    if (subscriptionStatus === 'premium') {
+                      handleDeleteSession(contextMenu.sessionId);
+                      return;
+                    }
+
+                    setContextMenu({ visible: false, x: 0, y: 0, sessionId: null });
+                    setPaymentMessage('Delete is a premium feature. Upgrade to continue.');
+                    openPaymentModal();
+                  }}
+                >
+                  Delete
+                </button>
+                {subscriptionStatus !== 'premium' ? (
+                  <button
+                    type="button"
+                    className="chat-session-menu-item"
+                    onClick={() => {
+                      setContextMenu({ visible: false, x: 0, y: 0, sessionId: null });
+                      setPaymentMessage('Rename and delete are premium features. Upgrade to continue.');
+                      openPaymentModal();
+                    }}
+                  >
+                    Upgrade to Premium
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </aside>
 

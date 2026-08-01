@@ -1,16 +1,39 @@
-import express from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { authMiddleware } from '../middleware/auth.js';
-import { appendMessageToSession, getSessionForUser, addKeyInsightsToSession } from '../services/session.store.js';
-import { createActionLogRecord } from '../services/actionLog.store.js';
+import express from "express";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { authMiddleware } from "../middleware/auth.js";
+import {
+  appendMessageToSession,
+  getSessionForUser,
+  addKeyInsightsToSession,
+} from "../services/session.store.js";
+import { createActionLogRecord } from "../services/actionLog.store.js";
 
 const router = express.Router();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+const resolveGeminiModel = () => {
+  const configuredModel = (process.env.GEMINI_MODEL || "").trim().toLowerCase();
+
+  if (
+    configuredModel &&
+    ![
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-latest",
+      "gemini-flash-latest",
+      "gemini-flash-latest",
+      "gemini-2.0-flash",
+    ].includes(configuredModel)
+  ) {
+    return configuredModel;
+  }
+
+  return "gemini-flash-latest";
+};
+
+const GEMINI_MODEL = resolveGeminiModel();
 
 const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
   return new GoogleGenerativeAI(apiKey);
 };
 
@@ -20,12 +43,16 @@ const SYSTEM_PROMPT = `You are BeyondFear, a supportive AI companion designed to
 Your core purpose:
 1. CREATE SAFETY: Be empathetic, non-judgmental, and confidential
 2. DRIVE ACTION: Move conversations from insight to small, executable next steps
+3. STAY ON TOPIC: Keep the conversation centered on fear, anxiety, avoidance, uncertainty, self-doubt, judgment, or related emotional patterns.
 
 Guidelines:
 - Listen deeply without judgment
 - Validate the person's feelings as legitimate
 - Ask clarifying questions to understand fear patterns
 - Help identify root causes (beliefs, past experiences, etc.)
+- Read the overall tone, emotional context, and conversational direction rather than relying only on specific words
+- If the conversation drifts away from fear-based themes, gently redirect it back in a warm, context-aware, and non-punitive way
+- Avoid being overly rigid; acknowledge the new direction briefly when appropriate, then guide the conversation back to the fear theme
 - Suggest 1-3 small, doable action steps (things they can do TODAY or this week)
 - Keep responses under 200 words for clarity
 - Use plain language (no clinical jargon)
@@ -52,41 +79,58 @@ Return valid JSON only in this shape:
 If you cannot suggest an action, return an empty actionItems array.`;
 
 const DEFAULT_ACTION_ITEM = {
-  title: 'Write down one fear trigger',
-  description: 'Capture the specific moment or thought that made the fear feel strongest today.',
-  actionType: 'reflection',
-  priority: 'medium',
-  difficulty: 'easy',
+  title: "Write down one fear trigger",
+  description:
+    "Capture the specific moment or thought that made the fear feel strongest today.",
+  actionType: "reflection",
+  priority: "medium",
+  difficulty: "easy",
 };
 
 const parseAssistantPayload = (text) => {
   if (!text) {
-    return { reply: '', keyInsights: [], actionItems: [] };
+    return { reply: "", keyInsights: [], actionItems: [] };
   }
 
-  const cleanedText = text.trim();
+  const cleanedText = String(text).trim();
 
-  // Extract JSON from anywhere in the response
-  // Gemini often adds preamble like "Here is my response:\n```json\n{...}```"
-  const jsonMatch =
-    cleanedText.match(/```json\s*([\s\S]*?)```/i) ||
-    cleanedText.match(/```\s*([\s\S]*?)```/i) ||
-    cleanedText.match(/(\{[\s\S]*\})/);  // raw JSON object
+  const candidateBlocks = [];
+  const fencedMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch && fencedMatch[1]) {
+    candidateBlocks.push(fencedMatch[1].trim());
+  }
 
-  const jsonCandidate = jsonMatch ? jsonMatch[1].trim() : cleanedText;
+  const objectMatch = cleanedText.match(/(\{[\s\S]*\})/);
+  if (objectMatch && objectMatch[1]) {
+    candidateBlocks.push(objectMatch[1].trim());
+  }
 
-  try {
-    const parsed = JSON.parse(jsonCandidate);
+  candidateBlocks.push(cleanedText);
 
-    if (parsed && typeof parsed === 'object') {
-      return {
-        reply: typeof parsed.reply === 'string' ? parsed.reply : cleanedText,
-        keyInsights: Array.isArray(parsed.keyInsights) ? parsed.keyInsights.filter(Boolean) : [],
-        actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems.filter(Boolean) : [],
-      };
+  for (const candidate of candidateBlocks) {
+    const normalizedCandidate = candidate
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```$/i, "")
+      .trim();
+
+    try {
+      const parsed = JSON.parse(normalizedCandidate);
+
+      if (parsed && typeof parsed === "object") {
+        return {
+          reply: typeof parsed.reply === "string" ? parsed.reply : cleanedText,
+          keyInsights: Array.isArray(parsed.keyInsights)
+            ? parsed.keyInsights.filter(Boolean)
+            : [],
+          actionItems: Array.isArray(parsed.actionItems)
+            ? parsed.actionItems.filter(Boolean)
+            : [],
+        };
+      }
+    } catch (error) {
+      // Try the next candidate.
     }
-  } catch (error) {
-    // Fall through to text response.
   }
 
   return {
@@ -94,6 +138,10 @@ const parseAssistantPayload = (text) => {
     keyInsights: [],
     actionItems: [],
   };
+};
+
+const shouldRedirectToFearTopic = () => {
+  return false;
 };
 
 const normalizeActionItems = (actionItems) => {
@@ -111,6 +159,35 @@ const normalizeActionItems = (actionItems) => {
   }));
 };
 
+const buildGeminiHistory = (conversationHistory) => {
+  const mappedHistory = conversationHistory
+    .map((msg) => {
+      if (msg.role === "assistant") {
+        return { role: "model", parts: [{ text: msg.content }] };
+      }
+
+      if (msg.role === "user") {
+        return { role: "user", parts: [{ text: msg.content }] };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+
+  while (mappedHistory.length > 0 && mappedHistory[0].role !== "user") {
+    mappedHistory.shift();
+  }
+
+  return mappedHistory.reduce((acc, entry) => {
+    if (acc.length > 0 && acc[acc.length - 1].role === entry.role) {
+      acc[acc.length - 1].parts.push(...entry.parts);
+    } else {
+      acc.push(entry);
+    }
+    return acc;
+  }, []);
+};
+
 const persistActionLogs = async (sessionId, userId, actionItems) => {
   const createdActionLogs = [];
 
@@ -121,7 +198,7 @@ const persistActionLogs = async (sessionId, userId, actionItems) => {
       title: actionItem.title,
       description: actionItem.description,
       actionType: actionItem.actionType,
-      status: 'pending',
+      status: "pending",
       dueDate: actionItem.dueDate ? new Date(actionItem.dueDate) : undefined,
       priority: actionItem.priority,
       difficulty: actionItem.difficulty,
@@ -139,33 +216,39 @@ const persistActionLogs = async (sessionId, userId, actionItems) => {
  * POST /api/messages/send
  * Send message to Claude and get response
  */
-router.post('/send', authMiddleware, async (req, res, next) => {
+router.post("/send", authMiddleware, async (req, res, next) => {
   try {
     const { sessionId, message } = req.body;
 
     if (!message || !message.trim()) {
-      return res.status(400).json({ error: 'Message cannot be empty' });
+      return res.status(400).json({ error: "Message cannot be empty" });
     }
 
     // Get session
     const session = await getSessionForUser(sessionId, req.user.userId);
 
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      return res.status(404).json({ error: "Session not found" });
     }
 
     // Add user message to session
-    const sessionAfterUserMessage = await appendMessageToSession(sessionId, req.user.userId, {
-      role: 'user',
-      content: message,
-      timestamp: new Date(),
-    });
+    const sessionAfterUserMessage = await appendMessageToSession(
+      sessionId,
+      req.user.userId,
+      {
+        role: "user",
+        content: message,
+        timestamp: new Date(),
+      },
+    );
 
     // Prepare messages for Claude API (last 10 messages for context)
-    const conversationHistory = sessionAfterUserMessage.messages.slice(-10).map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    const conversationHistory = sessionAfterUserMessage.messages
+      .slice(-10)
+      .map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
 
     try {
       // Call Gemini API
@@ -175,11 +258,9 @@ router.post('/send', authMiddleware, async (req, res, next) => {
         systemInstruction: SYSTEM_PROMPT,
       });
 
-      // Gemini uses alternating user/model roles (no system in history)
-      const geminiHistory = conversationHistory.slice(0, -1).map((msg) => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      }));
+      const geminiHistory = buildGeminiHistory(
+        conversationHistory.slice(0, -1),
+      );
 
       const chat = model.startChat({
         history: geminiHistory,
@@ -189,24 +270,47 @@ router.post('/send', authMiddleware, async (req, res, next) => {
         },
       });
 
-      const lastMessage = conversationHistory[conversationHistory.length - 1].content;
+      const lastMessage =
+        conversationHistory[conversationHistory.length - 1].content;
       const result = await chat.sendMessage(lastMessage);
       const aiMessageText = result.response.text();
       const parsedPayload = parseAssistantPayload(aiMessageText);
-      const replyText = parsedPayload.reply || 'I hear you. Let us work through this together.';
+      let replyText =
+        parsedPayload.reply && parsedPayload.reply.trim()
+          ? parsedPayload.reply
+          : aiMessageText && aiMessageText.trim()
+            ? aiMessageText.trim()
+            : "I hear you. Let us work through this together.";
+
+      if (shouldRedirectToFearTopic(message, conversationHistory)) {
+        replyText = `I can help with that, and I’m happy to follow your thread. Since the last few messages have been about fear, let’s gently bring it back to that: what part of this fear feels strongest right now?`;
+      }
+
       const actionItems = normalizeActionItems(parsedPayload.actionItems);
 
       // Add AI response to session
-      const sessionAfterAssistantMessage = await appendMessageToSession(sessionId, req.user.userId, {
-        role: 'assistant',
-        content: replyText,
-        timestamp: new Date(),
-      });
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
 
-      const createdActionLogs = await persistActionLogs(sessionId, req.user.userId, actionItems);
+      const createdActionLogs = await persistActionLogs(
+        sessionId,
+        req.user.userId,
+        actionItems,
+      );
 
       if (parsedPayload.keyInsights.length > 0) {
-        await addKeyInsightsToSession(sessionId, req.user.userId, parsedPayload.keyInsights);
+        await addKeyInsightsToSession(
+          sessionId,
+          req.user.userId,
+          parsedPayload.keyInsights,
+        );
       }
 
       res.json({
@@ -218,18 +322,31 @@ router.post('/send', authMiddleware, async (req, res, next) => {
         actionLogs: createdActionLogs,
       });
     } catch (apiError) {
-      console.error('Gemini API error:', apiError.message || apiError);
+      const errorMessage =
+        apiError?.message || apiError?.toString?.() || "Unknown Gemini error";
+      console.error("Gemini API error:", errorMessage);
 
-      // Return mock response for development/testing
-      const mockResponse = `I hear you. That sounds like a challenging situation. Could you tell me more about what triggered this feeling?`;
+      const isQuotaError =
+        /quota|429|rate limit|exceeded your current quota/i.test(errorMessage);
+      const mockResponse = isQuotaError
+        ? "I’m taking a short pause because the AI service is temporarily over its limit. Please try again in a moment, and I’ll keep supporting you in the meantime."
+        : "I hear you. That sounds like a challenging situation. Could you tell me more about what triggered this feeling?";
 
-      const sessionAfterAssistantMessage = await appendMessageToSession(sessionId, req.user.userId, {
-        role: 'assistant',
-        content: mockResponse,
-        timestamp: new Date(),
-      });
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: mockResponse,
+          timestamp: new Date(),
+        },
+      );
 
-      const createdActionLogs = await persistActionLogs(sessionId, req.user.userId, [DEFAULT_ACTION_ITEM]);
+      const createdActionLogs = await persistActionLogs(
+        sessionId,
+        req.user.userId,
+        [DEFAULT_ACTION_ITEM],
+      );
 
       res.json({
         message: mockResponse,
@@ -250,19 +367,19 @@ router.post('/send', authMiddleware, async (req, res, next) => {
  * POST /api/messages/mock
  * Get mock response (for development/testing without Claude API key)
  */
-router.post('/mock', authMiddleware, async (req, res, next) => {
+router.post("/mock", authMiddleware, async (req, res, next) => {
   try {
     const { sessionId, message } = req.body;
 
     const session = await getSessionForUser(sessionId, req.user.userId);
 
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      return res.status(404).json({ error: "Session not found" });
     }
 
     // Add user message
     await appendMessageToSession(sessionId, req.user.userId, {
-      role: 'user',
+      role: "user",
       content: message,
       timestamp: new Date(),
     });
@@ -275,16 +392,26 @@ router.post('/mock', authMiddleware, async (req, res, next) => {
       default: `I'm here to listen and help you move from awareness to action. What's on your mind today? Share as much or as little as you'd like.`,
     };
 
-    const keyword = Object.keys(mockResponses).find((key) => message.toLowerCase().includes(key));
+    const keyword = Object.keys(mockResponses).find((key) =>
+      message.toLowerCase().includes(key),
+    );
     const aiMessage = mockResponses[keyword] || mockResponses.default;
 
-    const sessionAfterAssistantMessage = await appendMessageToSession(sessionId, req.user.userId, {
-      role: 'assistant',
-      content: aiMessage,
-      timestamp: new Date(),
-    });
+    const sessionAfterAssistantMessage = await appendMessageToSession(
+      sessionId,
+      req.user.userId,
+      {
+        role: "assistant",
+        content: aiMessage,
+        timestamp: new Date(),
+      },
+    );
 
-    const createdActionLogs = await persistActionLogs(sessionId, req.user.userId, [DEFAULT_ACTION_ITEM]);
+    const createdActionLogs = await persistActionLogs(
+      sessionId,
+      req.user.userId,
+      [DEFAULT_ACTION_ITEM],
+    );
 
     res.json({
       message: aiMessage,
