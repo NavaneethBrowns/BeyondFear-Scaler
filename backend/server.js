@@ -14,8 +14,7 @@ import actionLogRoutes from './src/routes/actionLog.routes.js';
 import paymentRoutes from './src/routes/payment.routes.js';
 import messageRoutes from './src/routes/message.routes.js';
 
-// Load environment variables (.env.local takes precedence for local development)
-dotenv.config({ path: '.env.local' });
+// Load environment variables
 dotenv.config();
 
 const app = express();

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Navbar } from '../components/Navbar';
-import { Send, Plus, PanelLeftClose, PanelLeftOpen, Shield } from 'lucide-react';
+import { Send, Plus, PanelLeftClose, PanelLeftOpen, Shield, BarChart3 } from 'lucide-react';
 import { messageAPI, paymentAPI, sessionAPI } from '../services/api';
 import logo from '../assets/beyondfear-logo.svg';
+import { PaymentModal } from '../components/PaymentModal';
+import { SubscriptionBadge } from '../components/SubscriptionBadge';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
-const RAZORPAY_AMOUNT_PAISE = 29900;
 
 export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
   const [sessions, setSessions] = useState([]);
@@ -22,9 +23,15 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
   const [actionSummary, setActionSummary] = useState([]);
   const [intensityScore, setIntensityScore] = useState('');
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentPlansLoading, setPaymentPlansLoading] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState('');
   const [subscriptionStatus, setSubscriptionStatus] = useState('free');
+  const [subscriptionInfo, setSubscriptionInfo] = useState(null);
+  const [sessionsInfo, setSessionsInfo] = useState(null);
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
+  const [paymentPlans, setPaymentPlans] = useState([]);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [selectedPlanType, setSelectedPlanType] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const firstName = user?.displayName || user?.email?.split('@')[0] || 'there';
   const messagesEndRef = useRef(null);
@@ -49,16 +56,24 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     };
   }, []);
 
-  useEffect(() => {
-    const loadSubscriptionStatus = async () => {
-      try {
-        const result = await paymentAPI.getStatus();
-        setSubscriptionStatus(result?.subscription?.status || 'free');
-      } catch (error) {
-        setSubscriptionStatus('free');
+  const loadSubscriptionStatus = async () => {
+    try {
+      const result = await paymentAPI.getStatus();
+      setSubscriptionStatus(result?.subscription?.status || 'free');
+      setSubscriptionInfo(result?.subscription || null);
+      setSessionsInfo(result?.sessions || null);
+      setShowUpgradePrompt(result?.canCreateSession === false);
+      if (result?.limitMessage) {
+        setPaymentMessage(result.limitMessage);
       }
-    };
+    } catch (error) {
+      setSubscriptionStatus('free');
+      setSubscriptionInfo(null);
+      setSessionsInfo(null);
+    }
+  };
 
+  useEffect(() => {
     loadSubscriptionStatus();
   }, []);
 
@@ -117,9 +132,14 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     try {
       const result = await messageAPI.send(sessionId, pendingMessage);
 
+      const rawMessage = result?.message;
+      const normalizedMessage = typeof rawMessage === 'string'
+        ? rawMessage
+        : rawMessage?.reply || result?.reply || '';
+
       const aiResponse = {
         role: 'assistant',
-        content: result?.message || 'I hear you. Let us take the next step together.',
+        content: normalizedMessage || 'I hear you. Let us take the next step together.',
         timestamp: new Date(),
       };
 
@@ -133,7 +153,22 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     }
   };
 
-  const handleStartCheckout = async () => {
+  const openPaymentModal = async () => {
+    setPaymentModalOpen(true);
+    setPaymentPlansLoading(true);
+    setPaymentMessage('');
+
+    try {
+      const result = await paymentAPI.getPlans();
+      setPaymentPlans(result?.plans || []);
+    } catch (error) {
+      setPaymentMessage(error.message || 'Failed to load pricing plans.');
+    } finally {
+      setPaymentPlansLoading(false);
+    }
+  };
+
+  const handleStartCheckout = async (planType) => {
     if (subscriptionStatus === 'premium') {
       setPaymentMessage('You already have premium access.');
       return;
@@ -151,14 +186,15 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     }
 
     setPaymentLoading(true);
+    setSelectedPlanType(planType || '');
     setPaymentMessage('');
 
     try {
-      const order = await paymentAPI.createOrder({
-        amount: RAZORPAY_AMOUNT_PAISE,
-        currency: 'INR',
-        receipt: `bf_${Date.now()}`,
-      });
+      const orderResponse = await paymentAPI.createOrder({ planType });
+      const order = orderResponse?.order;
+      if (!order?.order_id) {
+        throw new Error('Order creation failed. Missing order ID.');
+      }
 
       const options = {
         key: keyId,
@@ -171,7 +207,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
           email: user?.email || '',
         },
         theme: {
-          color: '#00d9ff',
+          color: '#ff8a2e',
         },
         handler: async (response) => {
           try {
@@ -180,7 +216,9 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
             });
-            setSubscriptionStatus('premium');
+            await loadSubscriptionStatus();
+            setShowUpgradePrompt(false);
+            setPaymentModalOpen(false);
             setPaymentMessage('Payment successful. Premium unlocked.');
           } catch (error) {
             setPaymentMessage(error.message || 'Payment verification failed.');
@@ -197,6 +235,10 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
       razorpayInstance.on('payment.failed', (event) => {
         const description = event?.error?.description || 'Payment failed. Please try again.';
         setPaymentMessage(description);
+        paymentAPI.recordFailure({
+          orderId: order.order_id,
+          reason: description,
+        }).catch(() => {});
       });
       razorpayInstance.open();
     } catch (error) {
@@ -231,7 +273,12 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     } catch (error) {
       if (error.status === 402) {
         setShowUpgradePrompt(true);
-        setPaymentMessage('Your free session is used. Upgrade to Premium to start another session.');
+        setPaymentMessage(
+          error?.details?.error ||
+          'Your free session is used. Upgrade to Premium to start another session.'
+        );
+        setSessionsInfo(error?.details?.sessionLimit || sessionsInfo);
+        openPaymentModal();
       } else {
         setErrorMessage(error.message || 'Failed to create a session');
       }
@@ -244,7 +291,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
     e.preventDefault();
 
     if (showUpgradePrompt) {
-      handleStartCheckout();
+      openPaymentModal();
       return;
     }
 
@@ -261,7 +308,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
 
   const handleIncognitoChat = async () => {
     if (showUpgradePrompt) {
-      handleStartCheckout();
+      openPaymentModal();
       return;
     }
 
@@ -354,6 +401,19 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
               {sidebarOpen && <span>Incognito chat</span>}
             </button>
 
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className="chat-incognito-btn"
+              title="Open dashboard"
+            >
+              <BarChart3 className="h-4 w-4" />
+              {sidebarOpen && <span>Dashboard</span>}
+            </button>
+
+            {sidebarOpen ? (
+              <SubscriptionBadge subscriptionStatus={subscriptionStatus} sessionsInfo={sessionsInfo} />
+            ) : null}
+
             <div className="chat-sidebar-divider" />
 
             <div className="chat-session-list">
@@ -440,7 +500,7 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
                   <Button
                     variant={showUpgradePrompt ? 'action' : 'secondary'}
                     size="md"
-                    onClick={handleStartCheckout}
+                    onClick={openPaymentModal}
                     disabled={paymentLoading || subscriptionStatus === 'premium'}
                   >
                     {subscriptionStatus === 'premium'
@@ -557,6 +617,16 @@ export const ChatPage = ({ onNavigate, onLogout, isAuthenticated, user }) => {
           )}
         </section>
       </main>
+
+      <PaymentModal
+        open={paymentModalOpen && subscriptionStatus !== 'premium'}
+        plans={paymentPlans}
+        loading={paymentPlansLoading}
+        paymentLoading={paymentLoading}
+        selectedPlanType={selectedPlanType}
+        onClose={() => setPaymentModalOpen(false)}
+        onSelectPlan={(planType) => handleStartCheckout(planType)}
+      />
     </div>
   );
 };

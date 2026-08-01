@@ -65,10 +65,15 @@ const parseAssistantPayload = (text) => {
   }
 
   const cleanedText = text.trim();
-  const jsonCandidate = cleanedText
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```$/i, '');
+
+  // Extract JSON from anywhere in the response
+  // Gemini often adds preamble like "Here is my response:\n```json\n{...}```"
+  const jsonMatch =
+    cleanedText.match(/```json\s*([\s\S]*?)```/i) ||
+    cleanedText.match(/```\s*([\s\S]*?)```/i) ||
+    cleanedText.match(/(\{[\s\S]*\})/);  // raw JSON object
+
+  const jsonCandidate = jsonMatch ? jsonMatch[1].trim() : cleanedText;
 
   try {
     const parsed = JSON.parse(jsonCandidate);

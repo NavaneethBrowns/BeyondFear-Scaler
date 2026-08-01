@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export const apiCall = async (endpoint, options = {}) => {
   const token = localStorage.getItem('token');
@@ -95,10 +95,13 @@ export const messageAPI = {
 
 // Payment API
 export const paymentAPI = {
-  createOrder: ({ amount, currency = 'INR', receipt }) =>
+  getPlans: () =>
+    apiCall('/payments/plans'),
+
+  createOrder: ({ planType }) =>
     apiCall('/payments/create-order', {
       method: 'POST',
-      body: JSON.stringify({ amount, currency, receipt }),
+      body: JSON.stringify({ planType }),
     }),
 
   verifyPayment: ({ razorpay_order_id, razorpay_payment_id, razorpay_signature }) =>
@@ -108,4 +111,10 @@ export const paymentAPI = {
     }),
 
   getStatus: () => apiCall('/payments/status'),
+
+  recordFailure: ({ orderId, reason }) =>
+    apiCall('/payments/record-failure', {
+      method: 'POST',
+      body: JSON.stringify({ orderId, reason }),
+    }),
 };

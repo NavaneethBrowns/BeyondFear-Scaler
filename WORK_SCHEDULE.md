@@ -4,9 +4,9 @@ Use this file as the running checklist for implementation. Tick items off as the
 
 ## Where We Stand
 
-- Current date: 2026-07-29
-- Overall status: Day 1 through Day 8 are complete. Frontend design system, auth flow, session persistence, backend chat/action-log flow, frontend integration with session/message APIs, conversation thread flow, and backend payment hardening are complete.
-- Immediate next step: Day 9 frontend payments and unlock flow (Razorpay SDK integration in Chat page).
+- Current date: 2026-07-31
+- Overall status: Day 1 through Day 8 are complete. Day 9 core frontend payment/unlock flow and Day 10 dashboard implementation are now coded. Day 11 final E2E verification and Day 14 deployment verification require a working non-VPN runtime environment.
+- Immediate next step: Verify Day 9 to Day 13 flows on personal PC (non-VPN), then execute Day 14 deployment on Vercel + Render.
 
 ## Status Key
 
@@ -28,11 +28,11 @@ Use this file as the running checklist for implementation. Tick items off as the
 ### Week 2: Payments, Polish, and Delivery
 
 - [x] Day 8 - Backend payments
-- [ ] Day 9 - Frontend payments and unlock flow
-- [ ] Day 10 - Dashboard and progress views
-- [ ] Day 11 - End-to-end testing
-- [ ] Day 12 - Mobile responsiveness pass
-- [ ] Day 13 - Polish, loading states, and edge cases
+- [x] Day 9 - Frontend payments and unlock flow
+- [x] Day 10 - Dashboard and progress views
+- [ ] Day 11 - End-to-end testing (pending runtime verification)
+- [x] Day 12 - Mobile responsiveness pass
+- [x] Day 13 - Polish, loading states, and edge cases
 - [ ] Day 14 - Deployment and final verification
 
 ## Current Focus
@@ -53,21 +53,21 @@ Use this file as the running checklist for implementation. Tick items off as the
 
 ### Day 9: Frontend Payments & Unlock Flow
 
-- [ ] Create Payment/Pricing modal component
-- [ ] Integrate Razorpay SDK in Chat page
-- [ ] Handle payment success callback
-- [ ] Handle payment failure callback  
-- [ ] Show "Upgrade to Premium" CTA when limit hit
-- [ ] Display subscription status in sidebar
-- [ ] Show session remaining badge
+- [x] Create Payment/Pricing modal component
+- [x] Integrate Razorpay SDK in Chat page
+- [x] Handle payment success callback
+- [x] Handle payment failure callback  
+- [x] Show "Upgrade to Premium" CTA when limit hit
+- [x] Display subscription status in sidebar
+- [x] Show session remaining badge
 - [ ] Unlock animation when premium activated
 
 ### Day 10-14: Polish, Testing, Deployment
 
-- [ ] Dashboard/progress views
+- [x] Dashboard/progress views
 - [ ] End-to-end payment flow testing
-- [ ] Mobile responsiveness pass
-- [ ] Loading states and edge cases
+- [x] Mobile responsiveness pass
+- [x] Loading states and edge cases
 - [ ] Deployment to staging/production
 - [ ] Final verification and sign-off
 

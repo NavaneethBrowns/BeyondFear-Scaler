@@ -3,6 +3,7 @@ import { Homepage } from './pages/Homepage';
 import { SignupPage } from './pages/SignupPage';
 import { LoginPage } from './pages/LoginPage';
 import { ChatPage } from './pages/ChatPage';
+import { DashboardPage } from './pages/DashboardPage';
 import { authAPI } from './services/api';
 import { ThreeBackdrop } from './components/ThreeBackdrop';
 
@@ -120,6 +121,14 @@ function App() {
         )}
         {currentPage === 'chat' && isAuthenticated && (
           <ChatPage
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+            isAuthenticated={isAuthenticated}
+            user={user}
+          />
+        )}
+        {currentPage === 'dashboard' && isAuthenticated && (
+          <DashboardPage
             onNavigate={handleNavigate}
             onLogout={handleLogout}
             isAuthenticated={isAuthenticated}
