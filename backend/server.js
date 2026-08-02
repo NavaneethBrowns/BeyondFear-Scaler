@@ -13,12 +13,29 @@ import sessionRoutes from './src/routes/session.routes.js';
 import actionLogRoutes from './src/routes/actionLog.routes.js';
 import paymentRoutes from './src/routes/payment.routes.js';
 import messageRoutes from './src/routes/message.routes.js';
+import dashboardRoutes from './src/routes/dashboard.routes.js';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const configuredFrontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+const allowedDevOrigins = new Set([
+  configuredFrontendUrl,
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'http://localhost:8081',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:8080',
+  'http://127.0.0.1:8081',
+]);
+
+const isAllowedDevOrigin = (origin = '') => {
+  if (allowedDevOrigins.has(origin)) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1):(\d+)$/.test(origin);
+};
 
 // ==========================================
 // MIDDLEWARE
@@ -27,7 +44,13 @@ const PORT = process.env.PORT || 5000;
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    if (!origin || isAllowedDevOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
 }));
 
@@ -60,6 +83,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api', actionLogRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // 404 handler
 app.use((req, res) => {

@@ -67,9 +67,6 @@ router.post("/", authMiddleware, async (req, res, next) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if user can create a session
-    const sessionCheckResult = canCreateSession(user);
-
     const isIncognitoRequest = Boolean(req.body?.incognito);
     const currentSubscriptionStatus = getCurrentSubscriptionStatus(
       user.subscription,
@@ -87,6 +84,25 @@ router.post("/", authMiddleware, async (req, res, next) => {
         sessionLimit: getSessionsRemaining(user),
       });
     }
+
+    if (currentSubscriptionStatus !== SUBSCRIPTION_STATUS.PREMIUM) {
+      const existingSessions = await listSessionsForUser(req.user.userId);
+      if (existingSessions.length > 0) {
+        return res.status(402).json({
+          success: false,
+          error:
+            "Free users can continue in one existing session. Upgrade to premium for additional chats.",
+          message:
+            "Upgrade to premium to continue chatting beyond one active free session.",
+          requiresSubscription: true,
+          planType: "premium",
+          sessionLimit: getSessionsRemaining(user),
+        });
+      }
+    }
+
+    // Check if user can create a session
+    const sessionCheckResult = canCreateSession(user);
 
     if (!sessionCheckResult.allowed) {
       return res.status(402).json({
@@ -165,22 +181,6 @@ router.get("/:id", authMiddleware, async (req, res, next) => {
  */
 router.put("/:id", authMiddleware, async (req, res, next) => {
   try {
-    const user = await getUserById(req.user.userId);
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const accessCheck = requirePremiumForSessionAction(user);
-    if (!accessCheck.allowed) {
-      return res.status(402).json({
-        success: false,
-        error: accessCheck.reason,
-        message: "Upgrade to premium to rename chats.",
-        requiresSubscription: true,
-        planType: "premium",
-      });
-    }
-
     const { title, tags, description } = req.body;
 
     const session = await updateSessionForUser(req.params.id, req.user.userId, {

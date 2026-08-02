@@ -6,7 +6,10 @@ import {
   getSessionForUser,
   addKeyInsightsToSession,
 } from "../services/session.store.js";
-import { createActionLogRecord } from "../services/actionLog.store.js";
+import {
+  createActionLogRecord,
+  listActionLogsForSession,
+} from "../services/actionLog.store.js";
 
 const router = express.Router();
 
@@ -76,16 +79,16 @@ Return valid JSON only in this shape:
   ]
 }
 
-If you cannot suggest an action, return an empty actionItems array.`;
+If you cannot suggest an action, return an empty actionItems array.
 
-const DEFAULT_ACTION_ITEM = {
-  title: "Write down one fear trigger",
-  description:
-    "Capture the specific moment or thought that made the fear feel strongest today.",
-  actionType: "reflection",
-  priority: "medium",
-  difficulty: "easy",
-};
+Action-step rubric:
+- Do not create action items immediately. Wait until the fear/context is clear.
+- If intensity is 1-3, suggest at most 1 action.
+- If intensity is 4-6, suggest 1-2 actions.
+- If intensity is 7-8, suggest 2-3 actions.
+- If intensity is 9-10, suggest 3-5 actions, split into small sub-steps.
+- Keep actions realistic, specific, and safe.
+- Prefer progressive exposure, reflection prompts, and practical micro-commitments.`;
 
 const parseAssistantPayload = (text) => {
   if (!text) {
@@ -146,7 +149,7 @@ const shouldRedirectToFearTopic = () => {
 
 const normalizeActionItems = (actionItems) => {
   if (!Array.isArray(actionItems) || actionItems.length === 0) {
-    return [DEFAULT_ACTION_ITEM];
+    return [];
   }
 
   return actionItems.map((item) => ({
@@ -157,6 +160,72 @@ const normalizeActionItems = (actionItems) => {
     difficulty: item.difficulty || DEFAULT_ACTION_ITEM.difficulty,
     dueDate: item.dueDate || null,
   }));
+};
+
+const ACTION_READINESS_REGEX =
+  /(clear|clarity|plan|step|action|decide|decision|next|ready|understand|root cause|pattern|trigger)/i;
+
+const shouldGenerateActionItems = ({ conversationHistory, message, currentIntensity }) => {
+  const userMessageCount = conversationHistory.filter((entry) => entry.role === "user").length;
+  const hasClaritySignal = ACTION_READINESS_REGEX.test(message || "");
+  const highIntensity = typeof currentIntensity === "number" && currentIntensity >= 7;
+
+  return userMessageCount >= 3 || hasClaritySignal || highIntensity;
+};
+
+const toIsoDueDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+};
+
+const buildFallbackActionItems = ({ currentIntensity, message }) => {
+  const intensity =
+    typeof currentIntensity === "number" && currentIntensity >= 1 && currentIntensity <= 10
+      ? currentIntensity
+      : 5;
+
+  const targetCount = intensity >= 9 ? 4 : intensity >= 7 ? 3 : intensity >= 4 ? 2 : 1;
+  const topic = (message || "this fear").trim().slice(0, 70);
+  const dueDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  const candidates = [
+    {
+      title: "Name the trigger in one sentence",
+      description: `Write one clear sentence describing what about ${topic} feels most threatening right now.`,
+      actionType: "reflection",
+      priority: intensity >= 7 ? "high" : "medium",
+      difficulty: "easy",
+      dueDate,
+    },
+    {
+      title: "List evidence for and against the fear",
+      description: "Create two short lists: facts that support the fear story and facts that challenge it.",
+      actionType: "reflection",
+      priority: "medium",
+      difficulty: "medium",
+      dueDate,
+    },
+    {
+      title: "Take one low-risk exposure step",
+      description: "Choose a small action that faces the fear without overwhelming you, then do it within 24 hours.",
+      actionType: "behavior-change",
+      priority: "high",
+      difficulty: intensity >= 8 ? "hard" : "medium",
+      dueDate,
+    },
+    {
+      title: "Schedule a follow-up reflection",
+      description: "Set a 10-minute check-in to capture what changed in your intensity after the action.",
+      actionType: "goal",
+      priority: "medium",
+      difficulty: "easy",
+      dueDate,
+    },
+  ];
+
+  return candidates.slice(0, targetCount);
 };
 
 const buildGeminiHistory = (conversationHistory) => {
@@ -190,8 +259,19 @@ const buildGeminiHistory = (conversationHistory) => {
 
 const persistActionLogs = async (sessionId, userId, actionItems) => {
   const createdActionLogs = [];
+  const existing = await listActionLogsForSession(sessionId);
+  const existingTitles = new Set(
+    existing
+      .map((item) => item?.title?.trim().toLowerCase())
+      .filter(Boolean),
+  );
 
   for (const actionItem of actionItems) {
+    const normalizedTitle = actionItem.title?.trim().toLowerCase();
+    if (!normalizedTitle || existingTitles.has(normalizedTitle)) {
+      continue;
+    }
+
     const actionLog = await createActionLogRecord({
       userId,
       sessionId,
@@ -206,6 +286,7 @@ const persistActionLogs = async (sessionId, userId, actionItems) => {
 
     if (actionLog) {
       createdActionLogs.push(actionLog);
+      existingTitles.add(normalizedTitle);
     }
   }
 
@@ -218,7 +299,7 @@ const persistActionLogs = async (sessionId, userId, actionItems) => {
  */
 router.post("/send", authMiddleware, async (req, res, next) => {
   try {
-    const { sessionId, message } = req.body;
+    const { sessionId, message, currentIntensity } = req.body;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: "Message cannot be empty" });
@@ -272,7 +353,22 @@ router.post("/send", authMiddleware, async (req, res, next) => {
 
       const lastMessage =
         conversationHistory[conversationHistory.length - 1].content;
-      const result = await chat.sendMessage(lastMessage);
+      const actionReady = shouldGenerateActionItems({
+        conversationHistory,
+        message: lastMessage,
+        currentIntensity,
+      });
+      const intensityHint =
+        typeof currentIntensity === "number" && currentIntensity >= 1 && currentIntensity <= 10
+          ? `Current fear intensity score is ${currentIntensity}/10.`
+          : "";
+      const actionHint = actionReady
+        ? "The conversation appears clear enough. Return focused actionItems using the rubric."
+        : "The conversation is not clear enough yet. Return actionItems as an empty array and ask one clarifying question.";
+
+      const result = await chat.sendMessage(
+        `${lastMessage}\n\n${intensityHint}\n${actionHint}`,
+      );
       const aiMessageText = result.response.text();
       const parsedPayload = parseAssistantPayload(aiMessageText);
       let replyText =
@@ -286,7 +382,15 @@ router.post("/send", authMiddleware, async (req, res, next) => {
         replyText = `I can help with that, and I’m happy to follow your thread. Since the last few messages have been about fear, let’s gently bring it back to that: what part of this fear feels strongest right now?`;
       }
 
-      const actionItems = normalizeActionItems(parsedPayload.actionItems);
+      const normalizedActionItems = normalizeActionItems(parsedPayload.actionItems).map((item) => ({
+        ...item,
+        dueDate: toIsoDueDate(item.dueDate),
+      }));
+      const actionItems = actionReady
+        ? normalizedActionItems.length > 0
+          ? normalizedActionItems
+          : buildFallbackActionItems({ currentIntensity, message: lastMessage })
+        : [];
 
       // Add AI response to session
       const sessionAfterAssistantMessage = await appendMessageToSession(
@@ -326,6 +430,15 @@ router.post("/send", authMiddleware, async (req, res, next) => {
         apiError?.message || apiError?.toString?.() || "Unknown Gemini error";
       console.error("Gemini API error:", errorMessage);
 
+      const actionReady = shouldGenerateActionItems({
+        conversationHistory,
+        message,
+        currentIntensity,
+      });
+      const fallbackActions = actionReady
+        ? buildFallbackActionItems({ currentIntensity, message })
+        : [];
+
       const isQuotaError =
         /quota|429|rate limit|exceeded your current quota/i.test(errorMessage);
       const mockResponse = isQuotaError
@@ -345,7 +458,7 @@ router.post("/send", authMiddleware, async (req, res, next) => {
       const createdActionLogs = await persistActionLogs(
         sessionId,
         req.user.userId,
-        [DEFAULT_ACTION_ITEM],
+        fallbackActions,
       );
 
       res.json({
@@ -354,7 +467,7 @@ router.post("/send", authMiddleware, async (req, res, next) => {
         messagesCount: sessionAfterAssistantMessage.messages.length,
         isDevelopmentMode: true,
         keyInsights: [],
-        actionItems: [DEFAULT_ACTION_ITEM],
+        actionItems: fallbackActions,
         actionLogs: createdActionLogs,
       });
     }
@@ -410,14 +523,14 @@ router.post("/mock", authMiddleware, async (req, res, next) => {
     const createdActionLogs = await persistActionLogs(
       sessionId,
       req.user.userId,
-      [DEFAULT_ACTION_ITEM],
+      [],
     );
 
     res.json({
       message: aiMessage,
       sessionId,
       messagesCount: sessionAfterAssistantMessage.messages.length,
-      actionItems: [DEFAULT_ACTION_ITEM],
+      actionItems: [],
       actionLogs: createdActionLogs,
     });
   } catch (error) {
