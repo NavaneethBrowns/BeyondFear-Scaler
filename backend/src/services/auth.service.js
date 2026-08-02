@@ -1,4 +1,4 @@
-import { createAuthToken } from '../utils/authTokens.js';
+import { createAuthToken } from "../utils/authTokens.js";
 import {
   findUserByEmail,
   createUser,
@@ -7,17 +7,17 @@ import {
   toUserResponse,
   getUserById,
   updateUserProfile,
-} from './auth.store.js';
+} from "./auth.store.js";
 
-export const signup = async ({ email, password }) => {
+export const signup = async ({ displayName, email, password }) => {
   // Check if user exists
   const existingUser = await findUserByEmail(email);
   if (existingUser) {
-    throw { statusCode: 409, message: 'Email already registered' };
+    throw { statusCode: 409, message: "Email already registered" };
   }
 
   // Create new user
-  const user = await createUser({ email, password });
+  const user = await createUser({ displayName, email, password });
 
   // Generate token
   const { token, expiresAt } = createAuthToken(user._id);
@@ -29,13 +29,13 @@ export const login = async ({ email, password }) => {
   // Find user
   const user = await findUserByEmail(email);
   if (!user) {
-    throw { statusCode: 401, message: 'Invalid email or password' };
+    throw { statusCode: 401, message: "Invalid email or password" };
   }
 
   // Verify password
   const isValidPassword = await verifyUserPassword(user, password);
   if (!isValidPassword) {
-    throw { statusCode: 401, message: 'Invalid email or password' };
+    throw { statusCode: 401, message: "Invalid email or password" };
   }
 
   // Update last login

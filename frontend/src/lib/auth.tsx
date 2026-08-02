@@ -17,7 +17,7 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  signup: (displayName: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -99,7 +99,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: Boolean(user && token),
       isLoading,
       login: async (email, password) => applyAuth(authApi.login(email, password)),
-      signup: async (email, password) => applyAuth(authApi.signup(email, password)),
+      signup: async (displayName, email, password) =>
+        applyAuth(authApi.signup(displayName, email, password)),
       logout: async () => {
         if (token) {
           try {

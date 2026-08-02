@@ -12,6 +12,7 @@ export const Route = createFileRoute("/signup")({
 function SignupPage() {
   const navigate = useNavigate();
   const { signup, isAuthenticated, isLoading } = useAuth();
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -27,6 +28,11 @@ function SignupPage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (displayName.trim().length < 2) {
+      setError("Please enter your name (at least 2 characters).");
+      return;
+    }
+
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
       return;
@@ -41,7 +47,7 @@ function SignupPage() {
     setSubmitting(true);
 
     try {
-      await signup(email, password);
+      await signup(displayName.trim(), email, password);
       await navigate({ to: "/dashboard" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Signup failed");
@@ -71,6 +77,18 @@ function SignupPage() {
             </p>
 
             <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+              <label className="block text-sm text-foreground">
+                <span className="mb-2 block text-sm font-medium">Name</span>
+                <input
+                  type="text"
+                  required
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Your name"
+                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+                />
+              </label>
+
               <label className="block text-sm text-foreground">
                 <span className="mb-2 block text-sm font-medium">Email</span>
                 <input

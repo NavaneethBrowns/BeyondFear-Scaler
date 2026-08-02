@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Check, Compass, Footprints, Lock, ShieldCheck } from "lucide-react";
-import { CanopyLight } from "@/components/canopy-light";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { plans } from "@/data/mock";
@@ -71,7 +70,7 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <CanopyLight />
+        <div aria-hidden className="landing-hero-gradient" />
         <div className="relative mx-auto max-w-6xl px-5 pb-24 pt-20 sm:pt-28">
           <div className="max-w-3xl">
             <div className="eyebrow rise">A reflection space, not a therapy app</div>
@@ -91,7 +90,7 @@ export default function Landing() {
                 Start your free session
                 <ArrowRight className="size-4" aria-hidden />
               </Link>
-              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/70 px-4 py-2.5 text-sm text-muted-foreground backdrop-blur">
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/90 px-4 py-2.5 text-sm text-muted-foreground">
                 <ShieldCheck className="size-4 text-leaf" aria-hidden />1 free session, no card
                 required
               </span>
@@ -99,7 +98,7 @@ export default function Landing() {
           </div>
 
           {/* Product glimpse */}
-          <div className="rise mt-20 rounded-3xl border border-border bg-card/80 p-3 shadow-lift backdrop-blur">
+          <div className="rise mt-20 rounded-3xl border border-border bg-card/92 p-3 shadow-lift">
             <div className="rounded-2xl bg-background/70 p-6 sm:p-8">
               <div className="grid gap-6 sm:grid-cols-[1.3fr_1fr]">
                 <div className="space-y-4">
@@ -180,11 +179,6 @@ export default function Landing() {
       {/* Philosophy */}
       <section id="philosophy" className="mx-auto max-w-6xl px-5 py-24">
         <div className="relative overflow-hidden rounded-4xl border border-border bg-card p-8 shadow-soft sm:p-14">
-          <div
-            aria-hidden
-            className="canopy-a pointer-events-none absolute -right-24 -top-24 size-80 rounded-full blur-[90px]"
-            style={{ background: "radial-gradient(circle, oklch(0.75 0.13 155 / 0.35), transparent 70%)" }}
-          />
           <div className="relative max-w-[58ch]">
             <div className="eyebrow">Our position</div>
             <h2 className="mt-4 font-serif text-4xl leading-tight text-foreground sm:text-5xl">

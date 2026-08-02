@@ -150,7 +150,7 @@
   }
 
   html {
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
   }
 
   body {
@@ -243,6 +243,17 @@
 
 @utility rise {
   animation: rise-in 0.7s cubic-bezier(0.19, 1, 0.22, 1) both;
+}
+
+.landing-hero-gradient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 0% 20%, oklch(0.72 0.08 145 / 0.45) 0%, transparent 55%),
+    radial-gradient(120% 95% at 100% 15%, oklch(0.78 0.06 205 / 0.35) 0%, transparent 55%),
+    radial-gradient(90% 80% at 50% 70%, oklch(0.86 0.08 95 / 0.25) 0%, transparent 60%),
+    linear-gradient(180deg, oklch(0.975 0.013 95) 0%, oklch(0.968 0.016 100) 100%);
 }
 
 @media (prefers-reduced-motion: reduce) {

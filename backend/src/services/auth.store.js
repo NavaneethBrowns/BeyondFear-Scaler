@@ -1,23 +1,19 @@
-import mongoose from 'mongoose';
-import bcryptjs from 'bcryptjs';
-import User from '../models/User.js';
-import { applySubscriptionMaintenance } from '../utils/subscription.js';
+import mongoose from "mongoose";
+import bcryptjs from "bcryptjs";
+import User from "../models/User.js";
+import { applySubscriptionMaintenance } from "../utils/subscription.js";
 
 const isMongoReady = () => mongoose.connection?.readyState === 1;
 
 const toPublicUser = (user) => {
-  const {
-    passwordHash,
-    password,
-    ...safeUser
-  } = user;
+  const { passwordHash, password, ...safeUser } = user;
 
   return safeUser;
 };
 
 const assertMongoReady = () => {
   if (!isMongoReady()) {
-    throw new Error('MongoDB connection is not ready');
+    throw new Error("MongoDB connection is not ready");
   }
 };
 
@@ -27,17 +23,25 @@ export const findUserByEmail = async (email) => {
   return User.findOne({ email: normalizedEmail });
 };
 
-export const createUser = async ({ email, password }) => {
+export const createUser = async ({ displayName, email, password }) => {
   assertMongoReady();
   const normalizedEmail = email.toLowerCase();
-  const user = new User({ email: normalizedEmail, password });
+  const normalizedDisplayName =
+    typeof displayName === "string" && displayName.trim().length > 0
+      ? displayName.trim()
+      : null;
+  const user = new User({
+    displayName: normalizedDisplayName,
+    email: normalizedEmail,
+    password,
+  });
   await user.save();
   return user;
 };
 
 export const verifyUserPassword = async (user, plainPassword) => {
   assertMongoReady();
-  if (typeof user?.comparePassword === 'function') {
+  if (typeof user?.comparePassword === "function") {
     return user.comparePassword(plainPassword);
   }
 
@@ -56,7 +60,7 @@ export const touchLastLogin = async (user) => {
 export const getUserById = async (userId) => {
   assertMongoReady();
   const user = await User.findById(userId);
-  
+
   if (user) {
     // Apply subscription maintenance (check expiry, reset free sessions)
     return applySubscriptionMaintenance(user);
@@ -65,7 +69,10 @@ export const getUserById = async (userId) => {
   return user;
 };
 
-export const updateUserProfile = async (userId, { displayName, avatar, preferences }) => {
+export const updateUserProfile = async (
+  userId,
+  { displayName, avatar, preferences },
+) => {
   assertMongoReady();
   return User.findByIdAndUpdate(
     userId,
@@ -74,18 +81,26 @@ export const updateUserProfile = async (userId, { displayName, avatar, preferenc
       ...(avatar && { avatar }),
       ...(preferences && { preferences }),
     },
-    { new: true }
+    { new: true },
   );
 };
 
 export const toUserResponse = (user) => {
   if (!user) return null;
 
-  if (typeof user.toJSON === 'function') {
-    return user.toJSON();
-  }
+  const raw =
+    typeof user.toJSON === "function" ? user.toJSON() : toPublicUser(user);
+  const derivedDisplayName =
+    raw.displayName ||
+    raw.username ||
+    raw.name ||
+    (typeof raw.email === "string" ? raw.email.split("@")[0] : null) ||
+    null;
 
-  return toPublicUser(user);
+  return {
+    ...raw,
+    displayName: derivedDisplayName,
+  };
 };
 
 /**
@@ -105,53 +120,56 @@ export const updateUserSubscription = async (userId, subscriptionPatch) => {
 
   // Handle top-level subscription fields
   if (subscriptionPatch.status) {
-    update['subscription.status'] = subscriptionPatch.status;
+    update["subscription.status"] = subscriptionPatch.status;
   }
 
   if (subscriptionPatch.planType) {
-    update['subscription.planType'] = subscriptionPatch.planType;
+    update["subscription.planType"] = subscriptionPatch.planType;
   }
 
   if (subscriptionPatch.expiresAt) {
-    update['subscription.expiresAt'] = subscriptionPatch.expiresAt;
+    update["subscription.expiresAt"] = subscriptionPatch.expiresAt;
   }
 
   if (subscriptionPatch.lastPaymentDate) {
-    update['subscription.lastPaymentDate'] = subscriptionPatch.lastPaymentDate;
+    update["subscription.lastPaymentDate"] = subscriptionPatch.lastPaymentDate;
   }
 
   if (subscriptionPatch.nextResetDate) {
-    update['subscription.nextResetDate'] = subscriptionPatch.nextResetDate;
+    update["subscription.nextResetDate"] = subscriptionPatch.nextResetDate;
   }
 
   if (subscriptionPatch.freeSessionsLastResetDate) {
-    update['subscription.freeSessionsLastResetDate'] = subscriptionPatch.freeSessionsLastResetDate;
+    update["subscription.freeSessionsLastResetDate"] =
+      subscriptionPatch.freeSessionsLastResetDate;
   }
 
   // Handle freeSessions object
   if (subscriptionPatch.freeSessions) {
-    if (typeof subscriptionPatch.freeSessions.used === 'number') {
-      update['subscription.freeSessions.used'] = subscriptionPatch.freeSessions.used;
+    if (typeof subscriptionPatch.freeSessions.used === "number") {
+      update["subscription.freeSessions.used"] =
+        subscriptionPatch.freeSessions.used;
     }
-    if (typeof subscriptionPatch.freeSessions.total === 'number') {
-      update['subscription.freeSessions.total'] = subscriptionPatch.freeSessions.total;
+    if (typeof subscriptionPatch.freeSessions.total === "number") {
+      update["subscription.freeSessions.total"] =
+        subscriptionPatch.freeSessions.total;
     }
   }
 
   // Legacy support for old field names
-  if (typeof subscriptionPatch.freeSessionsUsed === 'number') {
-    update['subscription.freeSessions.used'] = subscriptionPatch.freeSessionsUsed;
+  if (typeof subscriptionPatch.freeSessionsUsed === "number") {
+    update["subscription.freeSessions.used"] =
+      subscriptionPatch.freeSessionsUsed;
   }
 
-  if (typeof subscriptionPatch.freeSessionsTotal === 'number') {
-    update['subscription.freeSessions.total'] = subscriptionPatch.freeSessionsTotal;
+  if (typeof subscriptionPatch.freeSessionsTotal === "number") {
+    update["subscription.freeSessions.total"] =
+      subscriptionPatch.freeSessionsTotal;
   }
 
-  const updatedUser = await User.findByIdAndUpdate(
-    userId,
-    update,
-    { new: true }
-  );
+  const updatedUser = await User.findByIdAndUpdate(userId, update, {
+    new: true,
+  });
 
   // Apply subscription maintenance
   return applySubscriptionMaintenance(updatedUser);

@@ -4,11 +4,16 @@ import { useAuth } from "@/lib/auth";
 
 export function SiteHeader() {
   const { isAuthenticated, isLoading, logout, user } = useAuth();
-  const label = user?.displayName || user?.email?.split("@")[0] || "Account";
+  const label =
+    user?.displayName ||
+    (user as { username?: string } | null)?.username ||
+    (user as { name?: string } | null)?.name ||
+    user?.email?.split("@")[0] ||
+    "Profile";
   const isPremium = user?.subscription?.status === "premium";
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
+    <header className="sticky top-0 z-50 border-b border-border/60 bg-background/95">
       <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-3 sm:flex sm:justify-between">
         <Link to="/" className="flex min-w-0 items-center gap-2.5 rounded-full">
           <span className="grid size-8 shrink-0 place-items-center rounded-full gradient-leaf">

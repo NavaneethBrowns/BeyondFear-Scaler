@@ -44,7 +44,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (!response.ok) {
     const message =
       typeof payload === "object" && payload !== null
-        ? String((payload as Record<string, unknown>).error || (payload as Record<string, unknown>).message || "Request failed")
+        ? String(
+            (payload as Record<string, unknown>).error ||
+              (payload as Record<string, unknown>).message ||
+              "Request failed",
+          )
         : "Request failed";
 
     const error = new Error(message) as ApiError;
@@ -174,10 +178,10 @@ type SendMessageResult = {
 };
 
 export const authApi = {
-  signup(email: string, password: string) {
+  signup(displayName: string, email: string, password: string) {
     return request<AuthResponse>("/auth/signup", {
       method: "POST",
-      body: { email, password },
+      body: { displayName, email, password },
     });
   },
   login(email: string, password: string) {
@@ -211,7 +215,11 @@ export const sessionsApi = {
   get(token: string, sessionId: string) {
     return request<{ session: SessionRecord }>(`/sessions/${sessionId}`, { token });
   },
-  update(token: string, sessionId: string, payload: { title?: string; description?: string; tags?: string[] }) {
+  update(
+    token: string,
+    sessionId: string,
+    payload: { title?: string; description?: string; tags?: string[] },
+  ) {
     return request<{ session: SessionRecord }>(`/sessions/${sessionId}`, {
       method: "PUT",
       token,
