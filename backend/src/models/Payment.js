@@ -16,10 +16,7 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentId: {
       type: String,
-      default: null,
-      unique: true,
-      sparse: true,
-      index: true,
+      default: undefined,
     },
     amount: {
       type: Number,
@@ -72,9 +69,19 @@ paymentSchema.index({ userId: 1, createdAt: -1 });
 // Index for finding successful payments
 paymentSchema.index({ userId: 1, status: 1 });
 
-// TTL index: auto-delete 'created' orders after 15 minutes if not captured
+// Unique paymentId only when a real payment id string exists.
 paymentSchema.index(
-  { createdAt: 1, status: 1 },
+  { paymentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { paymentId: { $type: 'string' } },
+  }
+);
+
+// TTL index: auto-delete 'created' orders after 15 minutes if not captured.
+// MongoDB TTL indexes must be single-field indexes.
+paymentSchema.index(
+  { createdAt: 1 },
   {
     expireAfterSeconds: 900, // 15 minutes
     partialFilterExpression: { status: 'created' },

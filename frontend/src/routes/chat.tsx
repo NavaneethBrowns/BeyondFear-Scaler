@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -30,8 +30,10 @@ import { CanopyEdge } from "@/components/canopy-light";
 import {
   actionLogsApi,
   messagesApi,
+  paymentsApi,
   sessionsApi,
   type ActionLog,
+  type PaymentPlanType,
   type SessionMessage,
   type SessionRecord,
 } from "@/lib/api";
@@ -39,9 +41,91 @@ import { useAuth } from "@/lib/auth";
 import { usePlan } from "@/lib/plan";
 import { plans } from "@/data/mock";
 
+type RazorpaySuccessPayload = {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayCheckoutOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: {
+    name?: string;
+    email?: string;
+  };
+  notes?: Record<string, string>;
+  theme?: {
+    color?: string;
+  };
+  modal?: {
+    ondismiss?: () => void;
+  };
+  handler: (response: RazorpaySuccessPayload) => void | Promise<void>;
+};
+
+type RazorpayCheckoutInstance = {
+  open: () => void;
+  on: (event: string, handler: (response: { error?: { description?: string }; metadata?: { order_id?: string } }) => void) => void;
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => RazorpayCheckoutInstance;
+  }
+}
+
+const PAYMENT_PLAN_IDS: PaymentPlanType[] = ["monthly", "quarterly", "annual"];
+const VERIFY_RETRY_DELAYS_MS = [5000, 20000, 60000];
+
+const toPaymentPlanType = (value: string): PaymentPlanType => {
+  return PAYMENT_PLAN_IDS.includes(value as PaymentPlanType)
+    ? (value as PaymentPlanType)
+    : "monthly";
+};
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let razorpayScriptPromise: Promise<void> | null = null;
+const ensureRazorpaySdk = async () => {
+  if (typeof window === "undefined") {
+    throw new Error("Razorpay checkout is only available in the browser.");
+  }
+
+  if (window.Razorpay) return;
+
+  if (!razorpayScriptPromise) {
+    razorpayScriptPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error("Unable to load Razorpay checkout script.")), { once: true });
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Unable to load Razorpay checkout script."));
+      document.body.appendChild(script);
+    });
+  }
+
+  await razorpayScriptPromise;
+
+  if (!window.Razorpay) {
+    throw new Error("Razorpay checkout did not initialize correctly.");
+  }
+};
+
 export const Route = createFileRoute("/chat")({
   validateSearch: (search: Record<string, unknown>) => ({
-    sessionId: typeof search.sessionId === "string" ? search.sessionId : undefined,
+    sessionId: typeof search["sessionId"] === "string" ? search["sessionId"] : undefined,
   }),
   head: () => ({
     meta: [
@@ -81,8 +165,9 @@ function formatMessageTime(value?: string) {
 function ChatWorkspace() {
   const navigate = useNavigate();
   const { sessionId } = Route.useSearch();
-  const { isAuthenticated, isLoading, token } = useAuth();
+  const { isAuthenticated, isLoading, token, refreshProfile, user } = useAuth();
   const { isPremium } = usePlan();
+  const starterSessionRequestRef = useRef<Promise<SessionRecord[]> | null>(null);
 
   const [sessionList, setSessionList] = useState<SessionRecord[]>([]);
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null);
@@ -93,11 +178,14 @@ function ChatWorkspace() {
 
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallReason, setPaywallReason] = useState("Unlimited sessions");
+  const [selectedPlan, setSelectedPlan] = useState<PaymentPlanType>(() => {
+    const featuredPlan = plans.find((plan) => plan.featured);
+    return toPaymentPlanType(featuredPlan?.id || plans[0]?.id || "monthly");
+  });
+  const [isStartingPayment, setIsStartingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
-
-  const [intensity, setIntensity] = useState(5);
-  const [isSavingIntensity, setIsSavingIntensity] = useState(false);
 
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [isCompletingSession, setIsCompletingSession] = useState(false);
@@ -110,19 +198,148 @@ function ChatWorkspace() {
 
   function requirePremium(reason: string) {
     setPaywallReason(reason);
+    setPaymentError("");
     setPaywallOpen(true);
+  }
+
+  async function verifyPaymentWithRetry(payload: RazorpaySuccessPayload) {
+    if (!token) throw new Error("You need to be logged in to verify payment.");
+
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= VERIFY_RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        await paymentsApi.verify(token, payload);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt === VERIFY_RETRY_DELAYS_MS.length) break;
+        const delayMs = VERIFY_RETRY_DELAYS_MS[attempt];
+        if (typeof delayMs === "number") {
+          await wait(delayMs);
+        }
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Payment verification failed after multiple attempts.");
+  }
+
+  async function handleStartPayment() {
+    if (!token || isStartingPayment) return;
+
+    setIsStartingPayment(true);
+    setPaymentError("");
+
+    try {
+      const orderResult = await paymentsApi.createOrder(token, selectedPlan);
+      await ensureRazorpaySdk();
+
+      if (!window.Razorpay) {
+        throw new Error("Razorpay checkout is unavailable.");
+      }
+
+      if (!orderResult.keyId) {
+        throw new Error("Razorpay key id is missing from backend response.");
+      }
+
+      const checkout = new window.Razorpay({
+        key: orderResult.keyId,
+        amount: orderResult.order.amount,
+        currency: orderResult.order.currency,
+        name: "Beyond Fear",
+        description: `${orderResult.planDetails.name} plan`,
+        order_id: orderResult.order.order_id,
+        ...(user?.displayName || user?.email
+          ? {
+              prefill: {
+                ...(user?.displayName ? { name: user.displayName } : {}),
+                ...(user?.email ? { email: user.email } : {}),
+              },
+            }
+          : {}),
+        notes: {
+          planType: selectedPlan,
+        },
+        theme: {
+          color: "#2E9E5B",
+        },
+        modal: {
+          ondismiss: () => {
+            if (!token) return;
+            void paymentsApi.recordFailure(token, {
+              orderId: orderResult.order.order_id,
+              reason: "Checkout dismissed by user",
+            });
+          },
+        },
+        handler: async (response) => {
+          try {
+            await verifyPaymentWithRetry(response);
+            await refreshProfile();
+            await loadSessions(activeSession?._id);
+            setPaywallOpen(false);
+            setPaymentError("");
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Payment was received but verification failed. Please contact support if this persists.";
+            setPaymentError(message);
+          }
+        },
+      });
+
+      checkout.on("payment.failed", (event) => {
+        const reason = event?.error?.description || "Payment failed";
+        setPaymentError(reason);
+
+        if (!token) return;
+        const orderId = event?.metadata?.order_id || orderResult.order.order_id;
+        void paymentsApi.recordFailure(token, {
+          orderId,
+          reason,
+        });
+      });
+
+      checkout.open();
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Unable to start payment.");
+    } finally {
+      setIsStartingPayment(false);
+    }
   }
 
   async function ensureStarterSession(currentSessions: SessionRecord[]) {
     if (!token) return currentSessions;
     if (currentSessions.length > 0) return currentSessions;
 
-    const created = await sessionsApi.create(token, {
-      title: "My first fear session",
-      fearIntensity: 5,
-    });
+    if (starterSessionRequestRef.current) {
+      return starterSessionRequestRef.current;
+    }
 
-    return [created.session];
+    const starterRequest = (async () => {
+      try {
+        const created = await sessionsApi.create(token, {
+          title: "My first fear session",
+        });
+
+        return [created.session];
+      } catch (error) {
+        // If another in-flight call created the free session first, use the latest list.
+        const listed = await sessionsApi.list(token);
+        const withoutDeleted = listed.sessions.filter((s) => s.status !== "deleted");
+        if (withoutDeleted.length > 0) {
+          return withoutDeleted;
+        }
+        throw error;
+      } finally {
+        starterSessionRequestRef.current = null;
+      }
+    })();
+
+    starterSessionRequestRef.current = starterRequest;
+    return starterRequest;
   }
 
   async function loadSessions(selectSessionId?: string) {
@@ -169,7 +386,6 @@ function ChatWorkspace() {
 
       const session = sessionResult.session;
       setActiveSession(session);
-      setIntensity(session.fearIntensity?.initialScore ?? 5);
       setActionLogs(actionLogResult.actionLogs);
 
       if (sessionsSeed) {
@@ -232,7 +448,6 @@ function ChatWorkspace() {
     try {
       const created = await sessionsApi.create(token, {
         title: "New Session",
-        fearIntensity: 5,
       });
 
       await loadSessions(created.session._id);
@@ -250,11 +465,18 @@ function ChatWorkspace() {
     setWorkspaceError("");
 
     try {
-      await messagesApi.send(token, {
+      const currentIntensity =
+        activeSession.fearIntensity?.finalScore ??
+        activeSession.fearIntensity?.initialScore;
+      const payload: { sessionId: string; message: string; currentIntensity?: number } = {
         sessionId: activeSession._id,
         message: outbound,
-        currentIntensity: intensity,
-      });
+      };
+      if (typeof currentIntensity === "number") {
+        payload.currentIntensity = currentIntensity;
+      }
+
+      await messagesApi.send(token, payload);
 
       await loadWorkspace(activeSession._id);
     } catch (error) {
@@ -262,27 +484,6 @@ function ChatWorkspace() {
       setDraft(outbound);
     } finally {
       setIsSending(false);
-    }
-  }
-
-  async function persistIntensity(value: number) {
-    if (!token || !activeSession) return;
-
-    setIsSavingIntensity(true);
-    try {
-      const updated = await sessionsApi.updateIntensity(token, activeSession._id, {
-        initialScore: value,
-      });
-      setActiveSession(updated.session);
-      setSessionList((previous) =>
-        previous.map((session) =>
-          session._id === updated.session._id ? { ...session, ...updated.session } : session,
-        ),
-      );
-    } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : "Unable to update intensity.");
-    } finally {
-      setIsSavingIntensity(false);
     }
   }
 
@@ -312,7 +513,10 @@ function ChatWorkspace() {
     setWorkspaceError("");
 
     try {
-      await sessionsApi.complete(token, activeSession._id, intensity);
+      const latestIntensity =
+        activeSession.fearIntensity?.finalScore ??
+        activeSession.fearIntensity?.initialScore;
+      await sessionsApi.complete(token, activeSession._id, latestIntensity);
       setClosePromptOpen(false);
       await loadSessions(activeSession._id);
     } catch (error) {
@@ -323,7 +527,7 @@ function ChatWorkspace() {
   }
 
   const activeTitle = activeSession?.title || activeSession?.fearTitle || "Session";
-  const startedAtIntensity = activeSession?.fearIntensity?.initialScore ?? 5;
+  const startedAtIntensity = activeSession?.fearIntensity?.initialScore;
 
   if (isLoading || !isAuthenticated || sessionsLoading) {
     return (
@@ -458,7 +662,10 @@ function ChatWorkspace() {
                 <div className="min-w-0">
                   <h1 className="truncate font-serif text-xl text-foreground">{activeTitle}</h1>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {messages.length} messages - started at intensity {startedAtIntensity}
+                    {messages.length} messages
+                    {typeof startedAtIntensity === "number"
+                      ? ` - started at intensity ${startedAtIntensity}`
+                      : " - intensity check-in happens in chat"}
                   </p>
                 </div>
                 <span className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
@@ -546,34 +753,6 @@ function ChatWorkspace() {
             </section>
 
             <aside className="space-y-4 xl:h-full xl:overflow-y-auto xl:pr-1">
-              <div className="rounded-3xl border border-border bg-card p-5 shadow-soft">
-                <div className="eyebrow">Where you are now</div>
-                <div className="mt-3 flex items-baseline gap-2">
-                  <span className="font-serif text-4xl text-foreground">{intensity}</span>
-                  <span className="text-sm text-muted-foreground">/ 10 intensity</span>
-                </div>
-                <label htmlFor="intensity" className="mt-4 block text-xs text-muted-foreground">
-                  How heavy does it feel right now?
-                </label>
-                <input
-                  id="intensity"
-                  type="range"
-                  min={1}
-                  max={10}
-                  value={intensity}
-                  onChange={(event) => setIntensity(Number(event.target.value))}
-                  onMouseUp={() => void persistIntensity(intensity)}
-                  onTouchEnd={() => void persistIntensity(intensity)}
-                  className="mt-2 w-full accent-[var(--color-leaf)]"
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Started at {startedAtIntensity}. No wrong answer here.
-                </p>
-                {isSavingIntensity && (
-                  <p className="mt-2 text-[11px] text-muted-foreground">Saving intensity...</p>
-                )}
-              </div>
-
               <div className="rounded-3xl border border-border bg-card p-5 shadow-soft lg:flex lg:min-h-0 lg:flex-col">
                 <div className="eyebrow">Next steps</div>
                 {workspaceLoading ? (
@@ -650,8 +829,11 @@ function ChatWorkspace() {
               <button
                 key={plan.id}
                 type="button"
+                onClick={() => setSelectedPlan(toPaymentPlanType(plan.id))}
                 className={`flex w-full items-center justify-between gap-4 rounded-2xl border p-4 text-left transition-colors ${
-                  plan.featured
+                  selectedPlan === plan.id
+                    ? "border-primary bg-secondary/60"
+                    : plan.featured
                     ? "border-primary bg-secondary/60"
                     : "border-border hover:bg-secondary/50"
                 }`}
@@ -668,12 +850,19 @@ function ChatWorkspace() {
             ))}
           </div>
 
+          {paymentError && (
+            <div className="mt-3 rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {paymentError}
+            </div>
+          )}
+
           <button
             type="button"
-            onClick={() => setPaywallOpen(false)}
-            className="mt-2 w-full rounded-full gradient-leaf px-5 py-3 text-sm font-medium text-primary-foreground"
+            disabled={isStartingPayment}
+            onClick={() => void handleStartPayment()}
+            className="mt-2 w-full rounded-full gradient-leaf px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
           >
-            Continue to payment
+            {isStartingPayment ? "Opening checkout..." : "Continue to payment"}
           </button>
           <Link to="/" hash="pricing" className="text-center text-xs text-muted-foreground hover:underline">
             Compare plans in detail

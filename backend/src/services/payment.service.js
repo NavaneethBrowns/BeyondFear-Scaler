@@ -89,7 +89,10 @@ export const createPaymentOrder = async ({
   } catch (error) {
     if (error.statusCode) throw error; // Re-throw validation errors
 
-    const statusCode = error?.statusCode === 401 ? 401 : 500;
+    const upstreamStatus = Number(error?.statusCode);
+    const statusCode = Number.isInteger(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus < 600
+      ? upstreamStatus
+      : 500;
     const message = error?.error?.description || error?.message || 'Failed to create Razorpay order';
     throw { statusCode, message };
   }

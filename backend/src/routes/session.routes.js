@@ -9,7 +9,11 @@ import {
   updateSessionForUser,
   updateFearIntensity,
 } from "../services/session.store.js";
-import { getUserById, updateUserSubscription } from "../services/auth.store.js";
+import {
+  getUserById,
+  releaseFreeSessionSlot,
+  reserveFreeSessionSlot,
+} from "../services/auth.store.js";
 import {
   canCreateSession,
   getSessionsRemaining,
@@ -62,6 +66,7 @@ router.get("/", authMiddleware, async (req, res, next) => {
 router.post("/", authMiddleware, async (req, res, next) => {
   try {
     const user = await getUserById(req.user.userId);
+    let reservedFreeSlot = false;
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
@@ -99,6 +104,21 @@ router.post("/", authMiddleware, async (req, res, next) => {
           sessionLimit: getSessionsRemaining(user),
         });
       }
+
+      const reservation = await reserveFreeSessionSlot(req.user.userId);
+      if (!reservation) {
+        return res.status(402).json({
+          success: false,
+          error:
+            "Free users can continue in one existing session. Upgrade to premium for additional chats.",
+          message:
+            "Upgrade to premium to continue chatting beyond one active free session.",
+          requiresSubscription: true,
+          planType: "premium",
+          sessionLimit: getSessionsRemaining(user),
+        });
+      }
+      reservedFreeSlot = true;
     }
 
     // Check if user can create a session
@@ -122,29 +142,20 @@ router.post("/", authMiddleware, async (req, res, next) => {
         ? req.body.fearIntensity
         : undefined;
 
-    const session = await createSessionRecord({
-      userId: req.user.userId,
-      title: req.body.title || req.body.fearTitle || "New Session",
-      description: req.body.description || req.body.fearDescription,
-      tags: req.body.tags || req.body.fearCategory,
-      fearIntensityInitial,
-    });
-
-    // If user is on free tier, increment session counter
-    if (user.subscription?.status === "free") {
-      const currentUsed = user.subscription.freeSessions?.used || 0;
-      const currentTotal = user.subscription.freeSessions?.total || 1;
-
-      await updateUserSubscription(req.user.userId, {
-        status: "free",
-        planType: "free",
-        freeSessions: {
-          used: currentUsed + 1,
-          total: currentTotal,
-        },
-        freeSessionsLastResetDate:
-          user.subscription.freeSessionsLastResetDate || new Date(),
+    let session;
+    try {
+      session = await createSessionRecord({
+        userId: req.user.userId,
+        title: req.body.title || req.body.fearTitle || "New Session",
+        description: req.body.description || req.body.fearDescription,
+        tags: req.body.tags || req.body.fearCategory,
+        fearIntensityInitial,
       });
+    } catch (creationError) {
+      if (reservedFreeSlot) {
+        await releaseFreeSessionSlot(req.user.userId);
+      }
+      throw creationError;
     }
 
     res.status(201).json({

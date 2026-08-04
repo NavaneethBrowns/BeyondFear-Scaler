@@ -162,6 +162,25 @@ export type DashboardSummaryResponse = {
   }>;
 };
 
+export type PaymentPlanType = "monthly" | "quarterly" | "annual";
+
+export type PaymentOrderResponse = {
+  success: boolean;
+  order: {
+    order_id: string;
+    amount: number;
+    currency: string;
+    planType: PaymentPlanType;
+  };
+  planDetails: {
+    name: string;
+    description: string;
+    amount: number;
+    durationDays: number;
+  };
+  keyId?: string;
+};
+
 type SendMessageResult = {
   message: string;
   sessionId: string;
@@ -285,5 +304,58 @@ export const actionLogsApi = {
 export const dashboardApi = {
   summary(token: string) {
     return request<DashboardSummaryResponse>("/dashboard/summary", { token });
+  },
+};
+
+export const paymentsApi = {
+  createOrder(token: string, planType: PaymentPlanType) {
+    return request<PaymentOrderResponse>("/payments/create-order", {
+      method: "POST",
+      token,
+      body: { planType },
+    });
+  },
+  verify(
+    token: string,
+    payload: {
+      razorpay_order_id: string;
+      razorpay_payment_id: string;
+      razorpay_signature: string;
+    },
+  ) {
+    return request<{
+      success: boolean;
+      message: string;
+      subscription: {
+        status: "free" | "premium";
+        planType: string;
+        expiresAt: string;
+      };
+    }>("/payments/verify", {
+      method: "POST",
+      token,
+      body: payload,
+    });
+  },
+  recordFailure(token: string, payload: { orderId: string; reason?: string }) {
+    return request<{ success: boolean; message: string }>("/payments/record-failure", {
+      method: "POST",
+      token,
+      body: payload,
+    });
+  },
+  status(token: string) {
+    return request<{
+      success: boolean;
+      subscription: AuthUser["subscription"];
+      sessions: {
+        used: number;
+        total: number;
+        remaining: number;
+        isUnlimited: boolean;
+      };
+      canCreateSession: boolean;
+      limitMessage: string | null;
+    }>("/payments/status", { token });
   },
 };

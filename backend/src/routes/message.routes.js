@@ -5,6 +5,7 @@ import {
   appendMessageToSession,
   getSessionForUser,
   addKeyInsightsToSession,
+  updateFearIntensity,
 } from "../services/session.store.js";
 import {
   createActionLogRecord,
@@ -43,25 +44,46 @@ const getGeminiClient = () => {
 // System prompt - guides AI behavior with safety + action messaging
 const SYSTEM_PROMPT = `You are BeyondFear, a supportive AI companion designed to help people identify fear-based patterns and turn awareness into action.
 
-Your core purpose:
-1. CREATE SAFETY: Be empathetic, non-judgmental, and confidential
-2. DRIVE ACTION: Move conversations from insight to small, executable next steps
-3. STAY ON TOPIC: Keep the conversation centered on fear, anxiety, avoidance, uncertainty, self-doubt, judgment, or related emotional patterns.
+Core stance:
+- Witness, not fixer.
+- Calm, grounded, unhurried.
+- Direct without coldness.
+- Curious, not certain.
+- Radically non-judgmental.
 
-Guidelines:
-- Listen deeply without judgment
-- Validate the person's feelings as legitimate
-- Ask clarifying questions to understand fear patterns
-- Help identify root causes (beliefs, past experiences, etc.)
-- Read the overall tone, emotional context, and conversational direction rather than relying only on specific words
-- If the conversation drifts away from fear-based themes, gently redirect it back in a warm, context-aware, and non-punitive way
-- Avoid being overly rigid; acknowledge the new direction briefly when appropriate, then guide the conversation back to the fear theme
-- Suggest 1-3 small, doable action steps (things they can do TODAY or this week)
-- Keep responses under 200 words for clarity
-- Use plain language (no clinical jargon)
-- Always end with a concrete action suggestion or reflection question
+Scope:
+- You only help with the user's own fear work.
+- If the user drifts to unrelated tasks (homework/coding/trivia/general assistant asks), redirect warmly back to fear work.
+- Do not explain enforcement logic; just remain in-role.
 
-Important: You are NOT a replacement for professional mental health care. If someone mentions crisis/self-harm, respond with empathy and encourage them to contact a mental health professional immediately.
+Stage behavior:
+- Stage 1 Self-observation: invite body-level noticing, not analysis.
+- Stage 2 Fear diagnosis: make fear concrete and specific.
+- Stage 3 Root connection: offer pattern as a question, never as a diagnosis.
+- Stage 4a Internal work: reflective prompts, no suppression language.
+- Stage 4b External work: tiny safe microactions, evidence over outcome.
+- Stage 5 Dissolution: verify reduced response over repeated exposure.
+
+Safety boundaries (hard):
+- Never provide operational harmful detail.
+- Never help dissolve conscience-fear (fear of consequences of harming others).
+- Never do romantic/intimate roleplay.
+- Never profile third parties.
+- Never suggest dangerous, illegal, or non-consensual actions.
+
+Crisis handling:
+- Yellow flag: slow down, ground in present, do not escalate intensity.
+- Red flag: pause and stop normal flow; recommend immediate trained human help.
+
+One-fear continuity:
+- Focus one fear thread per session.
+- If another fear appears before the first thread is complete, acknowledge and park it, then guide back to completing current thread.
+
+Response constraints:
+- Keep replies concise (generally <= 180 words).
+- Use plain language, no therapy jargon, no false certainty.
+- Ask one clarifying question at a time.
+- If fear is named but intensity score unknown, ask for 1-10 score before action planning.
 
 Return valid JSON only in this shape:
 {
@@ -83,12 +105,21 @@ If you cannot suggest an action, return an empty actionItems array.
 
 Action-step rubric:
 - Do not create action items immediately. Wait until the fear/context is clear.
+- If the user has named a fear but no intensity score is known yet, ask for a 1-10 intensity score before offering action plans.
 - If intensity is 1-3, suggest at most 1 action.
 - If intensity is 4-6, suggest 1-2 actions.
 - If intensity is 7-8, suggest 2-3 actions.
 - If intensity is 9-10, suggest 3-5 actions, split into small sub-steps.
 - Keep actions realistic, specific, and safe.
 - Prefer progressive exposure, reflection prompts, and practical micro-commitments.`;
+
+const DEFAULT_ACTION_ITEM = {
+  title: "Capture one concrete trigger",
+  description: "Write one sentence about what happened just before the fear spiked.",
+  actionType: "reflection",
+  priority: "medium",
+  difficulty: "easy",
+};
 
 const parseAssistantPayload = (text) => {
   if (!text) {
@@ -165,6 +196,96 @@ const normalizeActionItems = (actionItems) => {
 const ACTION_READINESS_REGEX =
   /(clear|clarity|plan|step|action|decide|decision|next|ready|understand|root cause|pattern|trigger)/i;
 
+const RED_FLAG_REGEX =
+  /(want to (?:hurt|kill) myself|end my life|suicid|self harm|can't do this anymore|harm (?:someone|others)|kill (?:someone|them))/i;
+
+const YELLOW_FLAG_REGEX =
+  /(nothing will ever change|i don't want to see anyone|numb|leave everything|disappear|hopeless)/i;
+
+const OFF_TOPIC_REGEX =
+  /(write (?:code|program)|debug|homework|assignment|math problem|resume|cover letter|news update|recipe|translate this|stock tip|crypto|movie recommendation)/i;
+
+const HARMFUL_OPERATIONAL_REGEX =
+  /(how to make (?:a )?bomb|build (?:a )?weapon|poison|overdose|bypass security|hack (?:into|a))/i;
+
+const CONSCIENCE_FEAR_REGEX =
+  /(stop feeling guilty|don't want to feel bad|fear of getting caught|avoid consequences|hurt (?:someone|them) and)/i;
+
+const THIRD_PARTY_PROFILE_REGEX =
+  /(analy(?:s|z)e (?:my|this) (?:partner|friend|boss|parent)|profile (?:them|someone)|manipulate (?:their|someone's) fear)/i;
+
+const DEPENDENCY_OR_INTIMACY_REGEX =
+  /(you are all i have|i only need you|be my girlfriend|be my boyfriend|i love you|marry me|date me)/i;
+
+const SECOND_FEAR_PIVOT_REGEX =
+  /(another fear|also afraid|besides that|and i also fear|one more fear)/i;
+
+const ACTION_DANGER_REGEX =
+  /(roof ledge|jump|speeding|without consent|stalk|illegal|weapon|drugs|substance|self-harm|harm someone)/i;
+
+const FEAR_TOPIC_REGEX =
+  /(fear|afraid|anxious|anxiety|panic|overwhelmed|worr(?:y|ied)|avoid|avoidance|self-doubt|judg(?:e|ment)|uncertain|uncertainty|nervous)/i;
+
+const RECENT_INTENSITY_PROMPT_REGEX =
+  /(1\s*(?:-|to)?\s*10|intensity|how heavy|score it)/i;
+
+const isValidIntensity = (value) =>
+  typeof value === "number" && value >= 1 && value <= 10;
+
+const resolveKnownIntensity = (session, currentIntensity) => {
+  if (isValidIntensity(currentIntensity)) return currentIntensity;
+  if (isValidIntensity(session?.fearIntensity?.finalScore)) {
+    return session.fearIntensity.finalScore;
+  }
+  if (isValidIntensity(session?.fearIntensity?.initialScore)) {
+    return session.fearIntensity.initialScore;
+  }
+  return undefined;
+};
+
+const extractIntensityFromText = (text) => {
+  if (!text || typeof text !== "string") return undefined;
+
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  const plainNumberMatch = normalized.match(/^([1-9]|10)$/);
+  if (plainNumberMatch) {
+    return Number(plainNumberMatch[1]);
+  }
+
+  const outOfTenMatch = normalized.match(/\b(10|[1-9])\s*\/\s*10\b/);
+  if (outOfTenMatch) {
+    return Number(outOfTenMatch[1]);
+  }
+
+  const contextualMatch = normalized.match(
+    /\b(?:intensity|score|level|heavy|feels?|feeling|currently|now|today|about|around|at)\b[^\d]{0,20}(10|[1-9])\b/,
+  );
+  if (contextualMatch) {
+    return Number(contextualMatch[1]);
+  }
+
+  return undefined;
+};
+
+const shouldAskForIntensity = ({ message, conversationHistory, knownIntensity }) => {
+  if (isValidIntensity(knownIntensity)) {
+    return false;
+  }
+
+  if (!FEAR_TOPIC_REGEX.test(message || "")) {
+    return false;
+  }
+
+  const recentAssistantMessages = conversationHistory
+    .filter((entry) => entry.role === "assistant")
+    .slice(-2)
+    .map((entry) => entry.content || "");
+
+  return !recentAssistantMessages.some((entry) => RECENT_INTENSITY_PROMPT_REGEX.test(entry));
+};
+
 const shouldGenerateActionItems = ({ conversationHistory, message, currentIntensity }) => {
   const userMessageCount = conversationHistory.filter((entry) => entry.role === "user").length;
   const hasClaritySignal = ACTION_READINESS_REGEX.test(message || "");
@@ -172,6 +293,48 @@ const shouldGenerateActionItems = ({ conversationHistory, message, currentIntens
 
   return userMessageCount >= 3 || hasClaritySignal || highIntensity;
 };
+
+const isFearRelatedMessage = (text = "") => FEAR_TOPIC_REGEX.test(text);
+
+const getRecentUserMessages = (conversationHistory) =>
+  conversationHistory
+    .filter((entry) => entry.role === "user")
+    .map((entry) => entry.content || "");
+
+const getPrimaryFearAnchor = (conversationHistory, session) => {
+  const sessionFearTitle = session?.fearTitle || session?.title;
+  if (
+    typeof sessionFearTitle === "string" &&
+    sessionFearTitle.trim() &&
+    !/^new session$/i.test(sessionFearTitle.trim()) &&
+    !/^my first fear session$/i.test(sessionFearTitle.trim())
+  ) {
+    return sessionFearTitle.trim();
+  }
+
+  const users = getRecentUserMessages(conversationHistory);
+  const firstFearMessage = users.find((entry) => isFearRelatedMessage(entry));
+  return firstFearMessage ? firstFearMessage.trim().slice(0, 80) : null;
+};
+
+const getOffTopicDriftLevel = (conversationHistory, latestMessage) => {
+  const recentUserMessages = getRecentUserMessages(conversationHistory).slice(-4);
+  const current = String(latestMessage || "");
+  const all = [...recentUserMessages, current];
+  return all.filter((entry) => OFF_TOPIC_REGEX.test(entry) && !isFearRelatedMessage(entry)).length;
+};
+
+const buildHardBoundaryResponse = (message) => ({
+  reply: message,
+  keyInsights: [],
+  actionItems: [],
+});
+
+const sanitizeActionItems = (actionItems) =>
+  actionItems.filter((item) => {
+    const text = `${item?.title || ""} ${item?.description || ""}`;
+    return !ACTION_DANGER_REGEX.test(text);
+  });
 
 const toIsoDueDate = (value) => {
   if (!value) return null;
@@ -312,6 +475,24 @@ router.post("/send", authMiddleware, async (req, res, next) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
+    const inferredIntensity = extractIntensityFromText(message);
+    const providedIntensity = isValidIntensity(currentIntensity)
+      ? currentIntensity
+      : inferredIntensity;
+
+    if (isValidIntensity(providedIntensity)) {
+      const hasInitialIntensity = isValidIntensity(session?.fearIntensity?.initialScore);
+      const hasFinalIntensity = isValidIntensity(session?.fearIntensity?.finalScore);
+
+      const intensityUpdate = hasInitialIntensity
+        ? hasFinalIntensity
+          ? { finalScore: providedIntensity }
+          : { initialScore: session.fearIntensity.initialScore, finalScore: providedIntensity }
+        : { initialScore: providedIntensity };
+
+      await updateFearIntensity(sessionId, req.user.userId, intensityUpdate);
+    }
+
     // Add user message to session
     const sessionAfterUserMessage = await appendMessageToSession(
       sessionId,
@@ -330,6 +511,278 @@ router.post("/send", authMiddleware, async (req, res, next) => {
         role: msg.role,
         content: msg.content,
       }));
+
+    const knownIntensity = resolveKnownIntensity(sessionAfterUserMessage, providedIntensity);
+
+    if (RED_FLAG_REGEX.test(message)) {
+      const replyText =
+        "I need to pause here. What you're carrying sounds heavier than this conversation can safely hold alone. Please contact a trained crisis professional or emergency support in your area right now. If you can, also reach out to someone you trust and stay with them while you get help.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (YELLOW_FLAG_REGEX.test(message)) {
+      const replyText =
+        "Let's slow this down for a moment. Can you name five things you can see and feel your feet on the ground for one full breath? Once you feel a little steadier, tell me what part feels heaviest right now.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (HARMFUL_OPERATIONAL_REGEX.test(message)) {
+      const replyText =
+        "I can help you work through the fear itself, but I can't provide technical or operational details for that. If you want, we can focus on what this fear is doing to you right now and what would help you feel safer.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (CONSCIENCE_FEAR_REGEX.test(message)) {
+      const replyText =
+        "What you're describing sounds less like fear holding you back and more like your conscience doing its job. I can't help remove that signal. If you'd like, we can explore how to make a safer, more responsible choice from here.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (THIRD_PARTY_PROFILE_REGEX.test(message)) {
+      const replyText =
+        "I can't profile someone else's fears from the outside. This framework works best when pointed at your own experience. What's your fear in this situation?";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (DEPENDENCY_OR_INTIMACY_REGEX.test(message)) {
+      const replyText =
+        "I care about helping you here, but I'm not a replacement for real relationships in your life. Let's keep this focused on your fear work and what support from real people might help right now.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    const driftLevel = getOffTopicDriftLevel(conversationHistory, message);
+    if (driftLevel >= 3 && OFF_TOPIC_REGEX.test(message) && !isFearRelatedMessage(message)) {
+      const replyText =
+        "This isn't landing in fear work right now, so let's pause here for today. When you're ready, come back with one fear you'd like to work through and we'll continue.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (driftLevel === 2 && OFF_TOPIC_REGEX.test(message) && !isFearRelatedMessage(message)) {
+      const replyText =
+        "I'm built specifically for your fear work, not general tasks. If this request has a fear underneath it, name that fear directly and we'll work from there.";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (driftLevel === 1 && OFF_TOPIC_REGEX.test(message) && !isFearRelatedMessage(message)) {
+      const replyText =
+        "That's outside what I'm here for. I'm built for fear work. Do you want to return to your current fear thread, or name the fear underneath this request?";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    const primaryFearAnchor = getPrimaryFearAnchor(conversationHistory, sessionAfterUserMessage);
+    if (
+      primaryFearAnchor &&
+      SECOND_FEAR_PIVOT_REGEX.test(message) &&
+      isFearRelatedMessage(message)
+    ) {
+      const replyText =
+        `Good catch. I hear a second fear thread here, and we should park it for now. Let's complete the current thread first: ${primaryFearAnchor}. What's the next smallest safe step you can take on this first fear in the next 24 hours?`;
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: replyText,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
+
+    if (shouldAskForIntensity({ message, conversationHistory, knownIntensity })) {
+      const intensityPrompt =
+        "Thank you for naming that. On a scale from 1 to 10, how intense does this fear feel right now?";
+
+      const sessionAfterAssistantMessage = await appendMessageToSession(
+        sessionId,
+        req.user.userId,
+        {
+          role: "assistant",
+          content: intensityPrompt,
+          timestamp: new Date(),
+        },
+      );
+
+      return res.json({
+        message: intensityPrompt,
+        sessionId,
+        messagesCount: sessionAfterAssistantMessage.messages.length,
+        keyInsights: [],
+        actionItems: [],
+        actionLogs: [],
+      });
+    }
 
     try {
       // Call Gemini API
@@ -356,11 +809,11 @@ router.post("/send", authMiddleware, async (req, res, next) => {
       const actionReady = shouldGenerateActionItems({
         conversationHistory,
         message: lastMessage,
-        currentIntensity,
+        currentIntensity: knownIntensity,
       });
       const intensityHint =
-        typeof currentIntensity === "number" && currentIntensity >= 1 && currentIntensity <= 10
-          ? `Current fear intensity score is ${currentIntensity}/10.`
+        isValidIntensity(knownIntensity)
+          ? `Current fear intensity score is ${knownIntensity}/10.`
           : "";
       const actionHint = actionReady
         ? "The conversation appears clear enough. Return focused actionItems using the rubric."
@@ -387,9 +840,9 @@ router.post("/send", authMiddleware, async (req, res, next) => {
         dueDate: toIsoDueDate(item.dueDate),
       }));
       const actionItems = actionReady
-        ? normalizedActionItems.length > 0
-          ? normalizedActionItems
-          : buildFallbackActionItems({ currentIntensity, message: lastMessage })
+        ? sanitizeActionItems(normalizedActionItems).length > 0
+          ? sanitizeActionItems(normalizedActionItems)
+          : buildFallbackActionItems({ currentIntensity: knownIntensity, message: lastMessage })
         : [];
 
       // Add AI response to session
@@ -433,10 +886,10 @@ router.post("/send", authMiddleware, async (req, res, next) => {
       const actionReady = shouldGenerateActionItems({
         conversationHistory,
         message,
-        currentIntensity,
+        currentIntensity: knownIntensity,
       });
       const fallbackActions = actionReady
-        ? buildFallbackActionItems({ currentIntensity, message })
+        ? buildFallbackActionItems({ currentIntensity: knownIntensity, message })
         : [];
 
       const isQuotaError =

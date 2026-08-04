@@ -82,6 +82,16 @@ function Dashboard() {
       .finally(() => setIsDashboardLoading(false));
   }, [isAuthenticated, isLoading, token]);
 
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || isDashboardLoading || !dashboard?.summary) {
+      return;
+    }
+
+    if (dashboard.summary.totalSessions === 0) {
+      void navigate({ to: "/chat" });
+    }
+  }, [dashboard, isAuthenticated, isDashboardLoading, isLoading, navigate]);
+
   const summary = dashboard?.summary;
   const insights = dashboard?.insights;
 

@@ -34,18 +34,18 @@ Use this file as the single implementation checklist for the revamp. Mark work d
 - [x] Day 4 - Rebuild login and signup screens against current backend auth
 - [x] Day 5 - Rebuild authenticated state, logout flow, and protected navigation
 
-### Phase 2: Core Product Flows
+### Phase 2: Core Product Flows (Day 6-9)
 
-- [ ] Day 6 - Rebuild sessions list, session creation, and session loading
-- [ ] Day 7 - Rebuild chat workspace and message thread using current backend APIs
-- [ ] Day 8 - Reconnect action items, completion flow, and intensity scoring
-- [ ] Day 9 - Rebuild dashboard/progress views on the new frontend
+- [~] Day 6 - Session policy hardening: enforce one free session total, block duplicate creation, route 0 sessions to chat
+- [~] Day 7 - AI conversation quality pass: in-chat intensity capture, one-fear-per-session flow, and scope integrity redirects
+- [ ] Day 8 - Action quality loop: microaction generation guardrails, completion logic, and fear-thread continuity
+- [ ] Day 9 - Progress correctness: expose progress only for users with 1+ sessions, validate metrics consistency
 
-### Phase 3: Pricing and Payments
+### Phase 3: Payments and Premium Unlock (Day 10-12)
 
-- [ ] Day 10 - Rebuild pricing presentation and subscription state surfaces
-- [ ] Day 11 - Reconnect Razorpay order, verify, failure, and unlock flows
-- [ ] Day 12 - Rebuild free-tier restrictions, paywall prompts, and premium gating
+- [ ] Day 10 - Razorpay test-mode integration complete in local: order creation, checkout, callback, signature verification
+- [ ] Day 11 - Subscription reliability in local: webhook confirmation, retries/idempotency, failure recovery, unlock sync
+- [ ] Day 12 - Local go-live gate: end-to-end QA from new user to paid unlock and launch-readiness decision
 
 ### Phase 4: Stability and Delivery
 
@@ -65,8 +65,8 @@ Use this file as the single implementation checklist for the revamp. Mark work d
 - [x] Auth token persistence and protected routes restored
 - [ ] Sessions API wired into chat/sidebar flow
 - [ ] Pricing cards updated to real BeyondFear plans
-- [ ] Razorpay checkout flow restored
-- [ ] Premium unlock state reflected in UI
+- [~] Razorpay checkout flow wired (pending local runtime verification)
+- [~] Premium unlock state refresh wired (pending local runtime verification)
 
 ## Detailed Task Breakdown
 
@@ -93,59 +93,85 @@ Use this file as the single implementation checklist for the revamp. Mark work d
 - [x] Show correct nav CTAs for guest vs authenticated user
 - [x] Verify logout clears client state fully
 
-### Day 6: Sessions
+### Day 6: Auth + Session Gating (Top Priority)
 
-- [ ] Wire fetch sessions list
-- [ ] Wire create session
-- [ ] Wire load single session
-- [ ] Wire rename session if supported in current UX
-- [ ] Wire delete session with premium-only guard
-- [ ] Reflect backend free-tier session limits in UI
+- [x] Free user session creation hard cap protected server-side (exactly one total)
+- [x] Duplicate starter-session race condition protection (frontend + backend)
+- [x] Post-login default route to chat/sessions, not progress
+- [x] Progress route guard for 0-session users
+- [ ] Regression test: free user cannot create second session in any tab/reload pattern
 
-### Day 7: Chat
+### Day 7: AI Conversation Quality Lock
 
-- [ ] Wire message send flow to backend
-- [ ] Render assistant and user messages correctly
-- [ ] Support initial landing input -> session creation path
-- [ ] Add loading and error states for send flow
-- [ ] Verify one full conversation path manually
+- [x] Intensity collection moved into chat conversation flow
+- [x] AI asks intensity (1-10) after fear is identified and score absent
+- [~] One-fear-per-session behavior: if a second fear appears, park it and return to first fear completion
+- [ ] Stage-based tonality mapping implemented (supportive/direct/challenging)
+- [ ] Scope integrity enforcement ladder implemented (drift, jailbreak, third-party, conscience-fear checks)
 
-### Day 8: Completion and Progress Signals
+### Day 8: Action and Completion Integrity
 
-- [ ] Wire action summary rendering
-- [ ] Wire final intensity input and completion action
-- [ ] Persist completion state in session list
-- [ ] Verify session completion updates backend and refresh state
+- [ ] Microaction whitelist enforcement (safe, legal, consensual, no dangerous exposure)
+- [ ] Action generation only after diagnosis/root/intensity conditions are met
+- [ ] Pre/post intensity checkpoints for each microaction
+- [ ] Completion requires evidence loop (attempt -> reflection -> recheck)
 
-### Day 9: Dashboard
+### Day 9: Progress Page Correctness
 
-- [ ] Rebuild metrics from current session/payment APIs
-- [ ] Rebuild charts/cards on the new UI system
-- [ ] Show subscription status and recent sessions
-- [ ] Verify dashboard with real seeded or live user data
+- [ ] Validate dashboard metrics against stored session truth (initial/final intensity, completion counts)
+- [ ] Ensure 0 sessions always route to chat
+- [ ] Ensure 1+ sessions can open progress page
+- [ ] Verify free and premium views both reflect correct plan state
 
-### Day 10: Pricing Surface
+### Day 10: Razorpay Real Integration (Local + Test Mode)
 
-- [ ] Replace template pricing with BeyondFear plans
-- [ ] Show free vs premium capabilities clearly
-- [ ] Reintroduce subscription badge/status surfaces
-- [ ] Verify current plan labels match backend pricing config
+- [ ] Backend order creation with plan metadata and amount validation
+- [ ] Frontend checkout flow with success/failure/cancel handling
+- [ ] Signature verification and payment status persistence
+- [ ] Unlock premium immediately after verified payment
 
-### Day 11: Razorpay
+### Day 11: Payment Reliability + Recovery
 
-- [ ] Load Razorpay SDK safely
-- [ ] Create order from backend
-- [ ] Handle success callback
-- [ ] Verify payment signature with backend
-- [ ] Handle cancellation and failure states
-- [ ] Persist unlock state and refresh subscription status
+- [ ] Webhook handling with idempotency keys
+- [ ] Retry-safe verify path (no duplicate premium grants)
+- [ ] Failure diagnostics surfaced in UI and logs
+- [ ] Subscription state refresh strategy (client + server)
 
-### Day 12: Limits and Gating
+### Day 12: Local Go-Live Decision Day
 
-- [ ] Enforce free-tier session restrictions in UI
-- [ ] Gate incognito and premium-only features
-- [ ] Show upgrade prompts at correct moments
-- [ ] Verify premium user can create multiple sessions
+- [ ] Full user-journey QA in local: new user -> one free session -> paywall -> Razorpay test payment -> unlock -> multi-session -> progress
+- [ ] Browser smoke on critical flow (Chrome primary)
+- [ ] Launch-readiness review with only P0/P1 blockers considered
+
+## Day 12 Acceptance Criteria (Must Pass)
+
+- [ ] Free user can create exactly one session and continue it indefinitely
+- [ ] Free user cannot create second session until payment verification succeeds
+- [ ] AI follows Beyond Fear tone, scope, and safety boundaries in real conversations
+- [ ] Razorpay test payment in local unlocks premium immediately and persists after refresh/login
+- [ ] Webhook or verify retries do not duplicate charges or duplicate entitlements
+- [ ] New user end-to-end path works without manual DB fixes
+
+## What Is Needed Now To Execute Day 10-12
+
+- [x] Razorpay test key ID and key secret (local test mode)
+- [ ] Razorpay webhook secret and webhook events enabled list
+- [x] Environment for this phase: local only
+- [x] Backend env values for JWT and Mongo confirmed present
+- [ ] Staging details deferred until post-Day-12 local pass
+- [ ] QA ownership intentionally deferred for MVP
+- [x] Session behavior lock confirmed: one free total session, reusable until completion, second fear is parked and user is guided back to finish first fear thread
+- [x] Provisional verify retry policy (local): 3 attempts with backoff 5s, 20s, 60s
+
+## Payment Behavior (Locked For Current Phase)
+
+- [x] Unlock premium immediately after successful `/api/payments/verify` signature verification
+- [x] Webhook-first unlock is deferred for this phase; webhook is treated as reliability/reconciliation path
+- [x] Verification definition: signature verification and subscription activation at `/api/payments/verify`
+
+## Tradeoff Rule (Locked)
+
+- [x] Optimize for user experience first, with balanced risk on speed vs reliability
 
 ### Day 13-16: Verification and Ship Readiness
 

@@ -19,7 +19,7 @@ function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      void navigate({ to: "/dashboard" });
+      void navigate({ to: "/chat" });
     }
   }, [isAuthenticated, isLoading, navigate]);
 
@@ -30,7 +30,7 @@ function LoginPage() {
 
     try {
       await login(email, password);
-      await navigate({ to: "/dashboard" });
+      await navigate({ to: "/chat" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Login failed");
     } finally {

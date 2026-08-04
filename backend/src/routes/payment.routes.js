@@ -21,6 +21,11 @@ import {
 
 const router = express.Router();
 
+const buildRazorpayReceipt = (userId) => {
+  const tail = String(userId || "guest").slice(-8);
+  return `bf_${Date.now()}_${tail}`;
+};
+
 /**
  * POST /api/payments/create-order
  * Create Razorpay payment order with plan validation
@@ -50,7 +55,7 @@ router.post('/create-order', authMiddleware, async (req, res, next) => {
     const order = await createPaymentOrder({
       amount: tier.amount,
       currency: tier.currency,
-      receipt: `rcpt_${req.user.userId}_${Date.now()}`,
+      receipt: buildRazorpayReceipt(req.user.userId),
       planType,
       userId: req.user.userId,
     });
@@ -58,6 +63,7 @@ router.post('/create-order', authMiddleware, async (req, res, next) => {
     res.json({
       success: true,
       order,
+      keyId: process.env.RAZORPAY_KEY_ID || undefined,
       planDetails: {
         name: tier.name,
         description: tier.description,

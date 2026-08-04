@@ -174,3 +174,37 @@ export const updateUserSubscription = async (userId, subscriptionPatch) => {
   // Apply subscription maintenance
   return applySubscriptionMaintenance(updatedUser);
 };
+
+export const reserveFreeSessionSlot = async (userId) => {
+  assertMongoReady();
+
+  return User.findOneAndUpdate(
+    {
+      _id: userId,
+      "subscription.status": "free",
+      $expr: {
+        $lt: ["$subscription.freeSessions.used", "$subscription.freeSessions.total"],
+      },
+    },
+    {
+      $inc: { "subscription.freeSessions.used": 1 },
+    },
+    { new: true },
+  );
+};
+
+export const releaseFreeSessionSlot = async (userId) => {
+  assertMongoReady();
+
+  return User.findOneAndUpdate(
+    {
+      _id: userId,
+      "subscription.status": "free",
+      "subscription.freeSessions.used": { $gt: 0 },
+    },
+    {
+      $inc: { "subscription.freeSessions.used": -1 },
+    },
+    { new: true },
+  );
+};

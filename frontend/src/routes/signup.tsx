@@ -21,7 +21,7 @@ function SignupPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      void navigate({ to: "/dashboard" });
+      void navigate({ to: "/chat" });
     }
   }, [isAuthenticated, isLoading, navigate]);
 
@@ -48,7 +48,7 @@ function SignupPage() {
 
     try {
       await signup(displayName.trim(), email, password);
-      await navigate({ to: "/dashboard" });
+      await navigate({ to: "/chat" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Signup failed");
     } finally {
