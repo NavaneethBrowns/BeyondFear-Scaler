@@ -1,6 +1,6 @@
 # BeyondFear: Unlock Your True Self
 
-> A conversational action-tracking platform to help you identify, unpack, and dissolve personal fears through guided dialogue and structured action steps.
+> A conversational action-tracking platform to help users identify fear patterns and move from reflection to practical action.
 
 ![Version](https://img.shields.io/badge/version-1.0.0--mvp-blue)
 ![Stack](https://img.shields.io/badge/stack-MERN-green)
@@ -8,433 +8,267 @@
 
 ---
 
-## 🎯 Quick Overview
+## Quick Overview
 
-**The Problem:** Most mental health apps make you *aware* of your patterns but don't help you *act* on them.
+BeyondFear focuses on one key problem: many wellness apps increase awareness but do not support consistent action.
 
-**Our Solution:** BeyondFear bridges the gap between awareness and action by:
-- 🗣️ **Conversational Discovery**: AI guide helps you reverse-engineer the root cause of your fear
-- 🎯 **Clear Direction**: Transform vague anxiety into a specific first step
-- ✅ **Action Tracking**: Create micro-commitments and track progress
-- 📊 **Insights Dashboard**: Visualize your fear intensity trends
-- 🔐 **Privacy First**: Encrypted sessions, anonymous by design
-- 🎓 **Graduation Model**: Help you become independent of the app
+Current MVP capabilities:
+- Guided fear conversation powered by Gemini.
+- Session-based chat with progress context.
+- Action log tracking (create, update, complete).
+- Dashboard metrics and intensity trends.
+- Razorpay test-mode subscription flow.
+- Clear free-vs-premium rules.
 
 ---
 
-## 🚀 Quick Start (5 minutes)
+## Current Access Rules
 
-**📋 See [ENV_SETUP_GUIDE.md](./ENV_SETUP_GUIDE.md) for security best practices and sharing with teammates.**
+- Free users can create one chat session and continue it.
+- Creating additional chats requires premium.
+- Incognito chat requires premium.
+- Rename and delete chat require premium.
+
+---
+
+## Tech Stack
+
+Backend:
+- Node.js + Express
+- MongoDB + Mongoose
+- JWT auth middleware
+- Gemini API integration
+- Razorpay payments
+
+Frontend:
+- React + TypeScript
+- TanStack Start + TanStack Router
+- Tailwind CSS + UI component primitives
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- **Node.js** 18+ ([Download](https://nodejs.org))
-- **MongoDB** (free account: [MongoDB Atlas](https://www.mongodb.com/cloud/atlas))
-- **Claude API Key** (free: [Anthropic Console](https://console.anthropic.com/keys))
-- **Razorpay Test Account** (free: [Razorpay](https://razorpay.com/sign-up))
+- Node.js 22+ recommended for frontend build consistency.
+- MongoDB Atlas cluster.
+- Gemini API key.
+- Razorpay test keys.
 
-### Step 1: Clone & Install
+### 1) Install dependencies
 
 ```bash
 git clone https://github.com/NavaneethBrowns/BeyondFear-Scaler.git
 cd BeyondFear-Scaler
 
-# Install backend dependencies
 cd backend && npm install
-
-# Install frontend dependencies
 cd ../frontend && npm install
 ```
 
-### Step 2: Get Free API Keys
+### 2) Backend environment
 
-**MongoDB:**
-1. Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
-2. Create free account → Create cluster (M0 free tier)
-3. Copy connection string: `mongodb+srv://user:password@cluster.mongodb.net/beyondfear-dev`
+Create `backend/.env.local` and fill:
 
-**Claude API:**
-1. Go to [Anthropic Console](https://console.anthropic.com)
-2. Create account → API Keys
-3. Copy key: `sk-ant-...`
+```env
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/beyondfear-dev
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-flash-latest
 
-**Razorpay Test Account:**
-1. Sign up at [Razorpay](https://razorpay.com/sign-up)
-2. Go to Settings → API Keys
-3. Copy test keys (starts with `rzp_test_`)
-
-### Step 3: Configure Environment
-
-**Backend Setup:**
-```bash
-cd backend
-cp .env.example .env.local
-
-# Edit .env.local with your keys
-# Windows: notepad .env.local
-# Mac/Linux: nano .env.local
-```
-
-Fill in these values:
-```
-MONGODB_URI=mongodb+srv://your-user:your-pass@cluster.mongodb.net/beyondfear-dev
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxx
 RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxx
 RAZORPAY_KEY_SECRET=rzp_test_xxxxxxxxxxxxxxxx
-JWT_SECRET=your-random-secret-32-chars-minimum
+PAYMENT_PROVIDER=razorpay
+
+JWT_SECRET=your_random_32_plus_char_secret
+JWT_EXPIRE=7d
+
+NODE_ENV=development
+PORT=5000
+FRONTEND_URL=http://localhost:5173
+
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
 ```
 
-**Frontend Setup:**
-```bash
-cd ../frontend
-cp .env.example .env.local
+### 3) Frontend environment
 
-# Edit with your public keys
-```
+Create `frontend/.env.local`:
 
-Fill in:
-```
+```env
 VITE_API_URL=http://localhost:5000/api
-VITE_RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxx
 ```
 
-### Step 4: Start Development
+### 4) Run locally
 
-**Terminal 1 - Backend:**
+Backend:
+
 ```bash
 cd backend
 npm run dev
-# Server running on http://localhost:5000
 ```
 
-**Terminal 2 - Frontend:**
+Frontend:
+
 ```bash
 cd frontend
 npm run dev
-# App running on http://localhost:5173
-```
-
-Open browser → `http://localhost:5173`
-
----
-
-## 💳 Payment Testing
-
-### Test Card Numbers
-
-| Provider | Card | Expiry | CVV |
-|----------|------|--------|-----|
-| **Razorpay** | 4111 1111 1111 1111 | Any future date | Any 3 digits |
-| **Stripe** | 4242 4242 4242 4242 | Any future date | Any 3 digits |
-
-### Test Payment Flow
-
-1. Sign up → Get 3 free sessions
-2. Try to create a 4th session → Payment wall appears
-3. Click "Subscribe" → Razorpay payment modal opens
-4. Enter test card details above
-5. Payment succeeds → Sessions unlocked
-
----
-
-## 📂 Project Structure
-
-```
-BeyondFear-Scaler/
-├── backend/
-│   ├── src/
-│   │   ├── models/           # MongoDB schemas
-│   │   │   ├── User.js
-│   │   │   ├── Session.js
-│   │   │   └── Payment.js
-│   │   ├── routes/           # Express routes
-│   │   │   ├── sessions.js
-│   │   │   ├── payments.js
-│   │   │   └── auth.js
-│   │   ├── services/         # Business logic
-│   │   │   ├── claudeService.js
-│   │   │   ├── paymentService.js
-│   │   │   └── encryptionService.js
-│   │   ├── middleware/
-│   │   │   └── auth.js
-│   │   └── server.js         # Entry point
-│   ├── .env.example
-│   ├── package.json
-│   └── README.md
-│
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Home.jsx
-│   │   │   ├── Session.jsx
-│   │   │   ├── Dashboard.jsx
-│   │   │   └── PaymentSuccess.jsx
-│   │   ├── components/
-│   │   │   ├── SessionForm.jsx
-│   │   │   ├── ConversationThread.jsx
-│   │   │   ├── ProgressChart.jsx
-│   │   │   └── PaymentModal.jsx
-│   │   ├── hooks/
-│   │   │   ├── useSession.js
-│   │   │   └── usePayment.js
-│   │   ├── utils/
-│   │   │   └── api.js
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── .env.example
-│   ├── package.json
-│   └── README.md
-│
-├── docs/
-│   ├── API_SPEC.md          # All endpoints
-│   ├── DATA_MODEL.md        # Database schema
-│   └── DEPLOYMENT.md        # Production setup
-│
-├── ENV_SETUP_GUIDE.md       # This file
-├── .gitignore
-└── README.md
 ```
 
 ---
 
-## 🔄 API Endpoints (Quick Reference)
+## API Base URLs
 
-### Sessions (Fears & Dialogues)
-- `POST   /api/sessions`              - Create new session
-- `GET    /api/sessions/:id`          - Get session details
-- `POST   /api/sessions/:id/messages` - Send message, get AI response
-- `PATCH  /api/sessions/:id/complete` - Mark session complete
-- `GET    /api/sessions`              - List user's sessions
-- Free tier includes 1 session; additional sessions require subscription.
+Local:
+- `http://localhost:5000/api`
 
-### Action Logs
-- `GET    /api/sessions/:sessionId/action-logs` - List tracked mini-actions
-- `POST   /api/sessions/:sessionId/action-logs` - Create an action log
-- `PATCH  /api/sessions/:sessionId/action-logs/:actionLogId` - Update action status
+Deployed backend (Render):
+- `https://beyondfear-scaler.onrender.com/api`
 
-### Payments
-- `POST   /api/payments/create-order`   - Start payment
-- `POST   /api/payments/verify`         - Verify & unlock sessions
-- `GET    /api/payments/history`        - Payment history
-- `POST   /api/payments/webhook`        - Razorpay webhook
+Health check:
+- `https://beyondfear-scaler.onrender.com/health`
 
-### Authentication
-- `POST   /api/auth/register` - Sign up
-- `POST   /api/auth/login`    - Log in
-- `GET    /api/auth/me`       - Current user
+Note: `GET /api` returning `{"error":"Endpoint not found"}` is expected because only specific `/api/*` routes are implemented.
 
 ---
 
-## 🎨 UI/UX - Mobile-First Design
+## Routes (Current)
 
-### Breakpoints
-- **Mobile:** < 768px (default, optimized)
-- **Tablet:** 768px - 1024px
-- **Desktop:** > 1024px
+Auth:
+- `POST /api/auth/signup`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `PUT /api/auth/profile`
+- `POST /api/auth/logout`
 
-### Pages
+Sessions:
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `GET /api/sessions/:id`
+- `PUT /api/sessions/:id`
+- `DELETE /api/sessions/:id`
+- `PATCH /api/sessions/:id/complete`
+- `PATCH /api/sessions/:id/intensity`
 
-**1. Landing/Home**
-- Hero: "Unlock Your True Self"
-- Value prop + CTA
-- Mobile: Full width, centered
-- Desktop: Sidebar nav + content
+Messages:
+- `POST /api/messages/:sessionId`
 
-**2. Sign Up / Log In**
-- Simple form
-- Mobile: Bottom input bar
-- Desktop: Centered card
+Action logs:
+- `GET /api/sessions/:sessionId/action-logs`
+- `POST /api/sessions/:sessionId/action-logs`
+- `PATCH /api/sessions/:sessionId/action-logs/:actionLogId`
 
-**3. Fear Entry**
-- Text area: "Describe your fear..."
-- Smart placeholder guidance
-- Mobile: Full screen input
-- Desktop: Modal or side panel
+Payments:
+- `POST /api/payments/create-order`
+- `POST /api/payments/verify`
+- `POST /api/payments/verify-payment`
+- `GET /api/payments/status`
+- `GET /api/payments/plans`
+- `POST /api/payments/record-failure`
 
-**4. Conversation View**
-- Thread display (scrollable)
-- Message input at bottom
-- Mobile: Full screen, bottom sticky input
-- Desktop: Max-width container, centered
-
-**5. Dashboard**
-- Session count card
-- Fear intensity chart (line graph)
-- Recent sessions list
-- Mobile: Vertical stack
-- Desktop: Grid layout
-
-**6. Payment**
-- Free sessions counter
-- "Upgrade" button
-- Razorpay modal (full screen on mobile)
+Dashboard:
+- `GET /api/dashboard/summary`
 
 ---
 
-## 🔐 Security & Privacy
+## Payment Testing (Razorpay Test Mode)
 
-### Credentials
-- **NEVER** commit `.env` or real API keys
-- Use `.env.local` for local development
-- `.env.example` has placeholders only
+Use test card:
+- Card: `4111 1111 1111 1111`
+- Expiry: any future date
+- CVV: any 3 digits
 
-### Data Protection
-- Passwords: Hashed with bcrypt
-- JWT tokens: Signed, 7-day expiry
-- Transcripts: Encrypted with Node crypto (optional)
-- Payments: PCI-compliant via Razorpay
-
-### Best Practices
-- Use test credentials for development
-- Rotate keys after MVP launch
-- Monitor Claude API usage (free tier: $5/month)
-- Use MongoDB free tier during development (upgrade before production)
+Test flow:
+1. Sign up and create first session.
+2. Attempt additional chat creation.
+3. Upgrade modal appears.
+4. Complete Razorpay test payment.
+5. Verify premium unlock.
 
 ---
 
-## 📊 Deployment Strategy
+## Deployment
 
-### Local Development
-- Backend: `npm run dev` (port 5000)
-- Frontend: `npm run dev` (port 5173)
+Recommended setup:
+- Backend: Render Web Service (root directory `backend`).
+- Frontend: Netlify (base directory `frontend`).
+- Database: MongoDB Atlas.
 
-### Staging (Before Submission)
-- **Backend:** Deploy to Railway.app (free tier)
-- **Frontend:** Deploy to Vercel (free tier)
-- **Database:** MongoDB Atlas (free tier)
+### Render backend settings
 
-### Production (Post-MVP)
-- Backend → Railway / Render
-- Frontend → Vercel
-- Database → MongoDB Atlas (paid)
-- CDN → Cloudflare (free)
+- Build command: `npm install`
+- Start command: `npm start`
 
----
+Important env values:
+- `NODE_ENV=production`
+- `FRONTEND_URL=https://<your-netlify-site>.netlify.app`
+- `MONGODB_URI` and other secrets
 
-## 🧪 Testing Payment Integration
+### Netlify frontend settings
 
-### Razorpay Test Flow
-1. Create order → `/api/payments/create-order`
-2. User sees modal with test card input
-3. Enter test card → Razorpay processes
-4. Verify signature → `/api/payments/verify`
-5. Unlock sessions on success
+- Base directory: `frontend`
+- Build command: `npm run build`
+- Publish directory: `dist`
 
-### Monitoring
-- Check Razorpay dashboard: Settings → Test Mode
-- See all test transactions (no real money)
-- Monitor error rates and payment success %
+Required env value:
+- `VITE_API_URL=https://beyondfear-scaler.onrender.com/api`
+
+Recommended build env:
+- `NODE_VERSION=22`
 
 ---
 
-## 🚢 Production Deployment
+## Security Notes
 
-Before going live:
-- [ ] Switch to production Razorpay keys
-- [ ] Enable encryption for transcripts
-- [ ] Set `NODE_ENV=production`
-- [ ] Configure CORS for production domain
-- [ ] Set up SSL certificates
-- [ ] Test payment with real card (small amount)
-- [ ] Monitor errors via logging service
+- Never commit `.env` or `.env.local`.
+- Keep Razorpay secret only on backend.
+- Use JWT with strong random secret.
+- Restrict CORS using `FRONTEND_URL`.
+- Rotate any leaked keys immediately.
 
 ---
 
-## 📝 Environment Variables Reference
+## Troubleshooting
 
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `MONGODB_URI` | Database connection | `mongodb+srv://...` |
-| `ANTHROPIC_API_KEY` | Claude AI | `sk-ant-...` |
-| `RAZORPAY_KEY_ID` | Payment public key | `rzp_test_...` |
-| `RAZORPAY_KEY_SECRET` | Payment secret | `rzp_test_...` |
-| `JWT_SECRET` | Auth token secret | 32+ random chars |
-| `PORT` | Server port | `5000` |
-| `FRONTEND_URL` | CORS origin | `http://localhost:5173` |
+Mongo connection fails on Render:
+- In Atlas Network Access, allow `0.0.0.0/0` for deployment.
+- Ensure `MONGODB_URI` contains a database name and valid credentials.
 
----
+CORS errors:
+- Set backend `FRONTEND_URL` to your deployed Netlify domain and redeploy.
 
-## 🐛 Troubleshooting
-
-### "Cannot find module 'express'"
-```bash
-# Make sure you ran npm install
-cd backend && npm install
-```
-
-### "MONGODB_URI is not defined"
-```bash
-# Create .env.local file
-cp .env.example .env.local
-# Edit with your MongoDB connection string
-```
-
-### Claude API returns 401 error
-```bash
-# Check API key is valid and not expired
-# Verify key starts with "sk-ant-"
-# Create new key: https://console.anthropic.com
-```
-
-### Razorpay payment fails with "Invalid key"
-```bash
-# Verify using TEST keys (rzp_test_)
-# Production keys (rzp_live_) won't work in test mode
-```
-
-### CORS errors in frontend
-```bash
-# Backend: Check FRONTEND_URL in .env.local matches dev server
-FRONTEND_URL=http://localhost:5173
-```
+Frontend cannot call backend:
+- Confirm `VITE_API_URL` is set and frontend is redeployed.
 
 ---
 
-## 📚 Additional Resources
+## Project Status
 
-- **API Documentation:** See `docs/API_SPEC.md`
-- **Database Schema:** See `docs/DATA_MODEL.md`
-- **Deployment Guide:** See `docs/DEPLOYMENT.md`
-- **Anthropic Docs:** https://docs.anthropic.com
-- **Razorpay Docs:** https://razorpay.com/docs
-
----
-
-## 🤝 Contributing
-
-This is a solo Scaler capstone project. Feedback welcome! 
+This repository currently contains both backend and frontend production-ready MVP code for:
+- Auth
+- Chat sessions
+- Action logs
+- Dashboard summary
+- Subscription and payment flow
 
 ---
 
-## 📄 License
+## Reviewer Notes
 
-MIT License - See LICENSE file for details
-
----
-
-## 🎓 Scaler Capstone Info
-
-**Project:** BeyondFear (Mental Wellness, MERN Stack)
-**Duration:** 2 weeks
-**Submission:** Before August 8, 2026
-**Tech Stack:** Node.js, Express, React, MongoDB, Claude AI, Razorpay
+- This project is deployed and usable end-to-end.
+- Payments are configured in Razorpay test mode for safe evaluation.
+- `GET /api` returning `{"error":"Endpoint not found"}` is expected; please use documented route paths.
 
 ---
 
-## ✅ Pre-Submission Checklist
+## Useful Links
 
-- [ ] All `.env` files are `.local` or `.example` (not in git)
-- [ ] Payment flow works end-to-end
-- [ ] Responsive design tested on mobile (DevTools)
-- [ ] Claude dialogue generates meaningful responses
-- [ ] Session data persists after refresh
-- [ ] Dashboard shows accurate metrics
-- [ ] No console errors in production mode
-- [ ] README updated with setup instructions
-- [ ] GitHub repo is public (submit link)
-- [ ] ZIP exported with proper folder structure
-- [ ] PDF report completed (based on WOOLF template)
+- Backend API base: `https://beyondfear-scaler.onrender.com/api`
+- Backend health: `https://beyondfear-scaler.onrender.com/health`
+- API docs in repo: `docs/API_SPEC.md`
+- Data model docs in repo: `docs/DATA_MODEL.md`
 
 ---
 
-**Ready to build? Start with backend setup above.** 🚀
+## License
+
+MIT
