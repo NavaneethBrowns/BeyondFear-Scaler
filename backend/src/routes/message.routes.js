@@ -121,12 +121,85 @@ const DEFAULT_ACTION_ITEM = {
   difficulty: "easy",
 };
 
+const ASSISTANT_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    reply: { type: "string" },
+    keyInsights: {
+      type: "array",
+      items: { type: "string" },
+      default: [],
+    },
+    actionItems: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          actionType: { type: "string" },
+          priority: { type: "string" },
+          difficulty: { type: "string" },
+          dueDate: { type: ["string", "null"] },
+        },
+        required: ["title", "description", "actionType", "priority", "difficulty", "dueDate"],
+        additionalProperties: false,
+      },
+      default: [],
+    },
+  },
+  required: ["reply", "keyInsights", "actionItems"],
+  additionalProperties: false,
+};
+
+const stripHtml = (value) => String(value || "").replace(/<[^>]*>/g, "");
+
+const extractFirstBalancedJsonObject = (text) => {
+  const source = String(text || "");
+  const start = source.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+
+    if (depth === 0) {
+      return source.slice(start, index + 1);
+    }
+  }
+
+  return null;
+};
+
 const parseAssistantPayload = (text) => {
   if (!text) {
     return { reply: "", keyInsights: [], actionItems: [] };
   }
 
   const cleanedText = String(text).trim();
+  const strippedText = stripHtml(cleanedText);
 
   const candidateBlocks = [];
   const fencedMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -134,12 +207,15 @@ const parseAssistantPayload = (text) => {
     candidateBlocks.push(fencedMatch[1].trim());
   }
 
-  const objectMatch = cleanedText.match(/(\{[\s\S]*\})/);
-  if (objectMatch && objectMatch[1]) {
-    candidateBlocks.push(objectMatch[1].trim());
+  const balancedJson = extractFirstBalancedJsonObject(cleanedText) || extractFirstBalancedJsonObject(strippedText);
+  if (balancedJson) {
+    candidateBlocks.push(balancedJson.trim());
   }
 
   candidateBlocks.push(cleanedText);
+  if (strippedText !== cleanedText) {
+    candidateBlocks.push(strippedText);
+  }
 
   for (const candidate of candidateBlocks) {
     const normalizedCandidate = candidate
@@ -168,7 +244,7 @@ const parseAssistantPayload = (text) => {
   }
 
   return {
-    reply: cleanedText,
+    reply: strippedText,
     keyInsights: [],
     actionItems: [],
   };
@@ -790,6 +866,10 @@ router.post("/send", authMiddleware, async (req, res, next) => {
       const model = genAI.getGenerativeModel({
         model: GEMINI_MODEL,
         systemInstruction: SYSTEM_PROMPT,
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: ASSISTANT_RESPONSE_SCHEMA,
+        },
       });
 
       const geminiHistory = buildGeminiHistory(
@@ -823,7 +903,22 @@ router.post("/send", authMiddleware, async (req, res, next) => {
         `${lastMessage}\n\n${intensityHint}\n${actionHint}`,
       );
       const aiMessageText = result.response.text();
-      const parsedPayload = parseAssistantPayload(aiMessageText);
+      const parsedPayload = (() => {
+        try {
+          const parsed = JSON.parse(aiMessageText);
+          if (parsed && typeof parsed === "object") {
+            return {
+              reply: typeof parsed.reply === "string" ? parsed.reply : "",
+              keyInsights: Array.isArray(parsed.keyInsights) ? parsed.keyInsights.filter(Boolean) : [],
+              actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems.filter(Boolean) : [],
+            };
+          }
+        } catch (error) {
+          // Fall back to recovery parsing below.
+        }
+
+        return parseAssistantPayload(aiMessageText);
+      })();
       let replyText =
         parsedPayload.reply && parsedPayload.reply.trim()
           ? parsedPayload.reply
