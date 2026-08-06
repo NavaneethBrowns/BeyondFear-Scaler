@@ -154,6 +154,49 @@ const ASSISTANT_RESPONSE_SCHEMA = {
 
 const stripHtml = (value) => String(value || "").replace(/<[^>]*>/g, "");
 
+const decodeJsonString = (value) => {
+  if (typeof value !== "string") return "";
+
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch (error) {
+    return value;
+  }
+};
+
+const extractReplyFieldFromJsonish = (text) => {
+  const source = String(text || "");
+  const replyMatch = source.match(/"reply"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+  if (!replyMatch || !replyMatch[1]) return "";
+
+  return decodeJsonString(replyMatch[1]).trim();
+};
+
+const isJsonLikeReply = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return false;
+
+  return (
+    /^```(?:json)?/i.test(normalized) ||
+    /^\{[\s\S]*\}$/.test(normalized) ||
+    /^\[[\s\S]*\]$/.test(normalized)
+  );
+};
+
+const normalizeAssistantReplyText = (value) => {
+  const cleaned = stripHtml(String(value || ""))
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  if (!cleaned) return "";
+  if (!isJsonLikeReply(cleaned)) return cleaned;
+
+  const extracted = extractReplyFieldFromJsonish(cleaned);
+  return extracted || "";
+};
+
 const extractFirstBalancedJsonObject = (text) => {
   const source = String(text || "");
   const start = source.indexOf("{");
@@ -243,8 +286,17 @@ const parseAssistantPayload = (text) => {
     }
   }
 
+  const extractedReply = extractReplyFieldFromJsonish(strippedText);
+  if (extractedReply) {
+    return {
+      reply: extractedReply,
+      keyInsights: [],
+      actionItems: [],
+    };
+  }
+
   return {
-    reply: strippedText,
+    reply: "",
     keyInsights: [],
     actionItems: [],
   };
@@ -919,12 +971,17 @@ router.post("/send", authMiddleware, async (req, res, next) => {
 
         return parseAssistantPayload(aiMessageText);
       })();
-      let replyText =
+      let replyText = normalizeAssistantReplyText(
         parsedPayload.reply && parsedPayload.reply.trim()
           ? parsedPayload.reply
           : aiMessageText && aiMessageText.trim()
             ? aiMessageText.trim()
-            : "I hear you. Let us work through this together.";
+            : "",
+      );
+
+      if (!replyText) {
+        replyText = "I hear you. Let us work through this together.";
+      }
 
       if (shouldRedirectToFearTopic(message, conversationHistory)) {
         replyText = `I can help with that, and I’m happy to follow your thread. Since the last few messages have been about fear, let’s gently bring it back to that: what part of this fear feels strongest right now?`;
