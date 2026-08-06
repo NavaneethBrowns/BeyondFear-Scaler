@@ -3,7 +3,10 @@
  * Handles subscription renewal, reset logic, and expiry checks
  */
 
-import { shouldResetFreeSessions, FREE_TIER_LIMITS } from '../config/pricing.js';
+import {
+  shouldResetFreeSessions,
+  FREE_TIER_LIMITS,
+} from "../config/pricing.js";
 
 /**
  * Reset free sessions for a user
@@ -14,8 +17,8 @@ import { shouldResetFreeSessions, FREE_TIER_LIMITS } from '../config/pricing.js'
 export const resetFreeSessions = (subscription) => {
   if (!subscription) {
     return {
-      status: 'free',
-      planType: 'free',
+      status: "free",
+      planType: "free",
       freeSessions: {
         used: 0,
         total: FREE_TIER_LIMITS.freeSessions,
@@ -24,9 +27,11 @@ export const resetFreeSessions = (subscription) => {
     };
   }
 
-  const needsReset = shouldResetFreeSessions(subscription.freeSessionsLastResetDate);
+  const needsReset = shouldResetFreeSessions(
+    subscription.freeSessionsLastResetDate,
+  );
 
-  if (needsReset && subscription.status === 'free') {
+  if (needsReset && subscription.status === "free") {
     return {
       ...subscription,
       freeSessions: {
@@ -46,7 +51,7 @@ export const resetFreeSessions = (subscription) => {
  * @returns {boolean} True if subscription has expired
  */
 export const isSubscriptionExpired = (subscription) => {
-  if (!subscription || subscription.status !== 'premium') {
+  if (!subscription || subscription.status !== "premium") {
     return false;
   }
 
@@ -70,8 +75,8 @@ export const handleExpiredSubscription = (subscription) => {
 
   if (isSubscriptionExpired(subscription)) {
     return {
-      status: 'free',
-      planType: 'free',
+      status: "free",
+      planType: "free",
       freeSessions: {
         used: 0,
         total: FREE_TIER_LIMITS.freeSessions,
@@ -96,14 +101,21 @@ export const applySubscriptionMaintenance = (user) => {
     return user;
   }
 
+  const sourceUser =
+    typeof user.toObject === "function"
+      ? user.toObject()
+      : typeof user.toJSON === "function"
+        ? user.toJSON()
+        : user;
+
   // Check if expired
-  let subscription = handleExpiredSubscription(user.subscription);
+  let subscription = handleExpiredSubscription(sourceUser.subscription);
 
   // Reset free sessions if needed
   subscription = resetFreeSessions(subscription);
 
   return {
-    ...user,
+    ...sourceUser,
     subscription,
   };
 };
@@ -116,8 +128,8 @@ export const applySubscriptionMaintenance = (user) => {
 export const formatSubscriptionResponse = (subscription) => {
   if (!subscription) {
     return {
-      status: 'free',
-      planType: 'free',
+      status: "free",
+      planType: "free",
       isActive: false,
       isExpired: false,
       daysRemaining: null,
@@ -128,17 +140,18 @@ export const formatSubscriptionResponse = (subscription) => {
   const isExpired = isSubscriptionExpired(subscription);
   const daysRemaining = subscription.expiresAt
     ? Math.max(
-      0,
-      Math.ceil(
-        (new Date(subscription.expiresAt) - new Date()) / (1000 * 60 * 60 * 24)
+        0,
+        Math.ceil(
+          (new Date(subscription.expiresAt) - new Date()) /
+            (1000 * 60 * 60 * 24),
+        ),
       )
-    )
     : null;
 
   return {
     status: subscription.status,
     planType: subscription.planType,
-    isActive: subscription.status === 'premium' && !isExpired,
+    isActive: subscription.status === "premium" && !isExpired,
     isExpired,
     daysRemaining,
     expiresAt: subscription.expiresAt,
@@ -154,22 +167,22 @@ export const formatSubscriptionResponse = (subscription) => {
  */
 export const getSubscriptionStatusMessage = (user) => {
   if (!user || !user.subscription) {
-    return 'Free tier - 1 session per month';
+    return "Free tier - 1 session per month";
   }
 
   const { subscription } = user;
 
-  if (subscription.status === 'premium') {
+  if (subscription.status === "premium") {
     if (isSubscriptionExpired(subscription)) {
       return `Premium subscription expired on ${new Date(subscription.expiresAt).toDateString()}`;
     }
 
     const daysLeft = Math.ceil(
-      (new Date(subscription.expiresAt) - new Date()) / (1000 * 60 * 60 * 24)
+      (new Date(subscription.expiresAt) - new Date()) / (1000 * 60 * 60 * 24),
     );
 
     return `Premium ${subscription.planType} - ${daysLeft} days remaining`;
   }
 
-  return 'Free tier - 1 session per month';
+  return "Free tier - 1 session per month";
 };

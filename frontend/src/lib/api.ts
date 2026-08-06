@@ -219,6 +219,24 @@ export const authApi = {
   me(token: string) {
     return request<{ user: AuthUser }>("/auth/me", { token });
   },
+  updateProfile(
+    token: string,
+    payload: {
+      displayName?: string;
+      avatar?: string;
+      preferences?: {
+        timezone?: string;
+        language?: string;
+        notificationsEnabled?: boolean;
+      };
+    },
+  ) {
+    return request<{ user: AuthUser }>("/auth/profile", {
+      method: "PUT",
+      token,
+      body: payload,
+    });
+  },
   logout(token: string) {
     return request<{ message: string }>("/auth/logout", {
       method: "POST",

@@ -4,12 +4,6 @@ import { useAuth } from "@/lib/auth";
 
 export function SiteHeader() {
   const { isAuthenticated, isLoading, logout, user } = useAuth();
-  const label =
-    user?.displayName ||
-    (user as { username?: string } | null)?.username ||
-    (user as { name?: string } | null)?.name ||
-    user?.email?.split("@")[0] ||
-    "Profile";
   const isPremium = user?.subscription?.status === "premium";
 
   return (
@@ -55,9 +49,13 @@ export function SiteHeader() {
               >
                 Progress
               </Link>
-              <span className="hidden rounded-full border border-border bg-card px-3 py-2 text-xs text-muted-foreground sm:inline-flex">
-                {label}
-              </span>
+              <Link
+                to="/profile"
+                className="rounded-full px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                activeProps={{ className: "bg-secondary text-foreground" }}
+              >
+                Profile
+              </Link>
               <button
                 type="button"
                 onClick={() => void logout()}
