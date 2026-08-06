@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Dialog,
+  DialogFooter,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -186,9 +187,14 @@ function ChatWorkspace() {
   const [paymentError, setPaymentError] = useState("");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [isCompletingSession, setIsCompletingSession] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<SessionRecord | null>(null);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -456,20 +462,154 @@ function ChatWorkspace() {
     }
   }
 
+  async function handleRenameSessionAction(session: SessionRecord) {
+    if (!token) return;
+
+    if (!isPremium) {
+      requirePremium("Renaming sessions");
+      return;
+    }
+
+    const currentTitle = session.title || session.fearTitle || "Untitled Session";
+    setRenamingSessionId(session._id);
+    setRenameDraft(currentTitle);
+  }
+
+  async function handleSubmitRenameSessionAction(session: SessionRecord) {
+    if (!token) return;
+
+    const nextTitle = renameDraft.trim();
+    const currentTitle = (session.title || session.fearTitle || "Untitled Session").trim();
+
+    if (!nextTitle || nextTitle === currentTitle) {
+      setRenamingSessionId(null);
+      setRenameDraft("");
+      return;
+    }
+
+    try {
+      const updated = await sessionsApi.update(token, session._id, {
+        title: nextTitle,
+      });
+
+      setSessionList((previous) =>
+        previous.map((item) =>
+          item._id === updated.session._id ? { ...item, ...updated.session } : item,
+        ),
+      );
+
+      if (activeSession?._id === updated.session._id) {
+        setActiveSession((prev) => (prev ? { ...prev, ...updated.session } : prev));
+      }
+      setRenamingSessionId(null);
+      setRenameDraft("");
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to rename session.");
+    }
+  }
+
+  async function handleDeleteSessionAction(session: SessionRecord) {
+    if (!token) return;
+
+    if (!isPremium) {
+      requirePremium("Deleting sessions");
+      return;
+    }
+
+    setPendingDeleteSession(session);
+    setConfirmDeleteOpen(true);
+  }
+
+  async function handleConfirmDeleteSessionAction() {
+    if (!token || !pendingDeleteSession) return;
+
+    setIsDeletingSession(true);
+
+    try {
+      await sessionsApi.delete(token, pendingDeleteSession._id);
+
+      const remaining = orderedSessions.filter((item) => item._id !== pendingDeleteSession._id);
+      const nextActiveId =
+        activeSession?._id === pendingDeleteSession._id ? remaining[0]?._id : activeSession?._id;
+
+      await loadSessions(nextActiveId);
+      setConfirmDeleteOpen(false);
+      setPendingDeleteSession(null);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to delete session.");
+    } finally {
+      setIsDeletingSession(false);
+    }
+  }
+
+  async function handleMakeIncognitoSessionAction(session: SessionRecord) {
+    if (!token) return;
+
+    if (!isPremium) {
+      requirePremium("Incognito sessions");
+      return;
+    }
+
+    try {
+      const nextTags = Array.from(new Set([...(session.tags ?? []), "incognito"]));
+
+      const updated = await sessionsApi.update(token, session._id, {
+        tags: nextTags,
+      });
+
+      setSessionList((previous) =>
+        previous.map((item) =>
+          item._id === updated.session._id ? { ...item, ...updated.session } : item,
+        ),
+      );
+
+      if (activeSession?._id === updated.session._id) {
+        setActiveSession((prev) => (prev ? { ...prev, ...updated.session } : prev));
+      }
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to make session incognito.");
+    }
+  }
+
   async function handleSendMessage() {
     if (!token || !activeSession || !draft.trim() || isSending) return;
 
     const outbound = draft.trim();
+    const activeSessionId = activeSession._id;
+    const optimisticTimestamp = new Date().toISOString();
+    const optimisticMessage: SessionMessage = {
+      role: "user",
+      content: outbound,
+      timestamp: optimisticTimestamp,
+    };
+
     setDraft("");
     setIsSending(true);
     setWorkspaceError("");
+
+    setActiveSession((previous) => {
+      if (!previous || previous._id !== activeSessionId) return previous;
+      return {
+        ...previous,
+        updatedAt: optimisticTimestamp,
+        messages: [...(previous.messages ?? []), optimisticMessage],
+      };
+    });
+
+    setSessionList((previous) =>
+      previous.map((item) =>
+        item._id === activeSessionId
+          ? { ...item, updatedAt: optimisticTimestamp }
+          : item,
+      ),
+    );
 
     try {
       const currentIntensity =
         activeSession.fearIntensity?.finalScore ??
         activeSession.fearIntensity?.initialScore;
       const payload: { sessionId: string; message: string; currentIntensity?: number } = {
-        sessionId: activeSession._id,
+        sessionId: activeSessionId,
         message: outbound,
       };
       if (typeof currentIntensity === "number") {
@@ -478,10 +618,28 @@ function ChatWorkspace() {
 
       await messagesApi.send(token, payload);
 
-      await loadWorkspace(activeSession._id);
+      await loadWorkspace(activeSessionId);
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : "Unable to send message.");
       setDraft(outbound);
+      setActiveSession((previous) => {
+        if (!previous || previous._id !== activeSessionId) return previous;
+
+        const previousMessages = previous.messages ?? [];
+        const rollbackMessages = previousMessages.filter((message, index) => {
+          const isOptimisticCopy =
+            index === previousMessages.length - 1 &&
+            message.role === "user" &&
+            message.content === outbound &&
+            message.timestamp === optimisticTimestamp;
+          return !isOptimisticCopy;
+        });
+
+        return {
+          ...previous,
+          messages: rollbackMessages,
+        };
+      });
     } finally {
       setIsSending(false);
     }
@@ -490,19 +648,38 @@ function ChatWorkspace() {
   async function handleToggleAction(action: ActionLog) {
     if (!token || !activeSession) return;
 
-    const nextStatus = action.status === "completed" ? "pending" : "completed";
-
     try {
-      const result = await actionLogsApi.update(token, activeSession._id, action._id, {
-        status: nextStatus,
-        completedAt: nextStatus === "completed" ? new Date().toISOString() : null,
-      });
+      if (action.status === "completed") {
+        return;
+      }
+
+      const responseText = window.prompt(
+        `Share what you tried for "${action.title}" (1-2 sentences). AI will validate before marking complete.`,
+      );
+
+      if (!responseText || !responseText.trim()) {
+        setWorkspaceError("Add a short response so AI can validate this step.");
+        return;
+      }
+
+      const result = await actionLogsApi.validateCompletion(
+        token,
+        activeSession._id,
+        action._id,
+        responseText.trim(),
+      );
 
       setActionLogs((previous) =>
         previous.map((item) => (item._id === result.actionLog._id ? result.actionLog : item)),
       );
+
+      if (!result.validation.isValid) {
+        setWorkspaceError(result.validation.feedback);
+      } else {
+        setWorkspaceError("");
+      }
     } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : "Unable to update next step.");
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to validate next step.");
     }
   }
 
@@ -561,6 +738,8 @@ function ChatWorkspace() {
               <ul className="space-y-1">
                 {orderedSessions.map((session, index) => {
                   const isActive = session._id === activeSession?._id;
+                  const isRenaming = renamingSessionId === session._id;
+                  const isIncognito = (session.tags ?? []).includes("incognito");
                   const locked = !isPremium && index > 0;
                   return (
                     <li
@@ -571,6 +750,7 @@ function ChatWorkspace() {
                     >
                       <button
                         type="button"
+                        disabled={isRenaming}
                         onClick={() =>
                           locked
                             ? requirePremium("Your full session history")
@@ -585,7 +765,33 @@ function ChatWorkspace() {
                               isActive ? "font-medium text-foreground" : "text-muted-foreground"
                             }`}
                           >
-                            {session.title || session.fearTitle || "Untitled Session"}
+                            {isRenaming ? (
+                              <input
+                                value={renameDraft}
+                                autoFocus
+                                onChange={(event) => setRenameDraft(event.target.value)}
+                                onBlur={() => {
+                                  void handleSubmitRenameSessionAction(session);
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    void handleSubmitRenameSessionAction(session);
+                                  }
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    setRenamingSessionId(null);
+                                    setRenameDraft("");
+                                  }
+                                }}
+                                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground outline-none ring-0 focus:border-leaf"
+                              />
+                            ) : (
+                              <span className="inline-flex max-w-full items-center gap-1.5">
+                                <span className="truncate">{session.title || session.fearTitle || "Untitled Session"}</span>
+                                {isIncognito && <EyeOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Incognito session" />}
+                              </span>
+                            )}
                           </span>
                         </span>
                         <span className="mt-0.5 block truncate text-xs text-muted-foreground">
@@ -603,9 +809,9 @@ function ChatWorkspace() {
                         <DropdownMenuContent align="end" className="w-52">
                           <DropdownMenuItem
                             onSelect={(event) => {
-                              if (!isPremium) {
-                                event.preventDefault();
-                                requirePremium("Renaming sessions");
+                              event.preventDefault();
+                              if (!isRenaming) {
+                                void handleRenameSessionAction(session);
                               }
                             }}
                           >
@@ -615,7 +821,9 @@ function ChatWorkspace() {
                           <DropdownMenuItem
                             onSelect={(event) => {
                               event.preventDefault();
-                              requirePremium("Incognito sessions");
+                              if (!isRenaming) {
+                                void handleMakeIncognitoSessionAction(session);
+                              }
                             }}
                           >
                             {isPremium ? <EyeOff className="size-4" aria-hidden /> : <Lock className="size-4" aria-hidden />}
@@ -625,7 +833,9 @@ function ChatWorkspace() {
                             className={isPremium ? "text-destructive focus:text-destructive" : undefined}
                             onSelect={(event) => {
                               event.preventDefault();
-                              requirePremium("Deleting sessions");
+                              if (!isRenaming) {
+                                void handleDeleteSessionAction(session);
+                              }
                             }}
                           >
                             {isPremium ? <Trash2 className="size-4" aria-hidden /> : <Lock className="size-4" aria-hidden />}
@@ -770,9 +980,16 @@ function ChatWorkspace() {
                           <li key={action._id}>
                             <button
                               type="button"
-                              onClick={() => void handleToggleAction(action)}
+                              onClick={() => {
+                                if (!done) {
+                                  void handleToggleAction(action);
+                                }
+                              }}
                               aria-pressed={done}
-                              className="flex w-full items-start gap-3 rounded-2xl border border-border p-3 text-left transition-colors hover:bg-secondary/60"
+                              disabled={done}
+                              className={`flex w-full items-start gap-3 rounded-2xl border border-border p-3 text-left ${
+                                done ? "cursor-default" : "transition-colors hover:bg-secondary/60"
+                              }`}
                             >
                               <span
                                 className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border ${
@@ -867,6 +1084,48 @@ function ChatWorkspace() {
           <Link to="/" hash="pricing" className="text-center text-xs text-muted-foreground hover:underline">
             Compare plans in detail
           </Link>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmDeleteOpen}
+        onOpenChange={(open) => {
+          setConfirmDeleteOpen(open);
+          if (!open && !isDeletingSession) {
+            setPendingDeleteSession(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-2xl">Delete this session?</DialogTitle>
+            <DialogDescription>
+              This will remove <strong>{pendingDeleteSession?.title || pendingDeleteSession?.fearTitle || "this session"}</strong> from your history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmDeleteOpen(false);
+                setPendingDeleteSession(null);
+              }}
+              disabled={isDeletingSession}
+              className="inline-flex items-center justify-center rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleConfirmDeleteSessionAction();
+              }}
+              disabled={isDeletingSession}
+              className="inline-flex items-center justify-center rounded-full bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-60"
+            >
+              {isDeletingSession ? "Deleting..." : "Delete"}
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || "https://beyondfear-scaler.onrender.com/api";
+const API_BASE_URL = import.meta.env["VITE_API_URL"] || "http://localhost:5000/api";
 
 export type ApiError = Error & {
   status?: number;
@@ -26,7 +26,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       method: options.method || "GET",
       headers,
       credentials: "include",
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: options.body !== undefined ? JSON.stringify(options.body) : null,
     });
   } catch {
     const error = new Error(
@@ -45,8 +45,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const message =
       typeof payload === "object" && payload !== null
         ? String(
-            (payload as Record<string, unknown>).error ||
-              (payload as Record<string, unknown>).message ||
+            (payload as Record<string, unknown>)["error"] ||
+              (payload as Record<string, unknown>)["message"] ||
               "Request failed",
           )
         : "Request failed";
@@ -97,6 +97,7 @@ export type SessionRecord = {
   title: string | null;
   fearTitle?: string | null;
   description?: string;
+  tags?: string[];
   fearDescription?: string;
   fearCategory?: string;
   status: SessionStatus;
@@ -127,6 +128,12 @@ export type ActionLog = {
   difficulty?: "easy" | "medium" | "hard";
   createdAt: string;
   updatedAt: string;
+};
+
+export type ActionValidationResult = {
+  isValid: boolean;
+  feedback: string;
+  confidence?: number;
 };
 
 export type DashboardSummaryResponse = {
@@ -224,7 +231,15 @@ export const sessionsApi = {
   list(token: string) {
     return request<{ sessions: SessionRecord[] }>("/sessions", { token });
   },
-  create(token: string, payload: { title?: string; description?: string; fearIntensity?: number }) {
+  create(
+    token: string,
+    payload: {
+      title?: string;
+      description?: string;
+      fearIntensity?: number;
+      incognito?: boolean;
+    },
+  ) {
     return request<{ session: SessionRecord }>("/sessions", {
       method: "POST",
       token,
@@ -298,6 +313,16 @@ export const actionLogsApi = {
       token,
       body: payload,
     });
+  },
+  validateCompletion(token: string, sessionId: string, actionLogId: string, responseText: string) {
+    return request<{ actionLog: ActionLog; validation: ActionValidationResult }>(
+      `/sessions/${sessionId}/action-logs/${actionLogId}/validate-completion`,
+      {
+        method: "PATCH",
+        token,
+        body: { responseText },
+      },
+    );
   },
 };
 

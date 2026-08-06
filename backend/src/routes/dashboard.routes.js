@@ -21,7 +21,9 @@ const average = (values) => {
 };
 
 const getWeekStartUtc = (date) => {
-  const value = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const value = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
   const day = value.getUTCDay();
   const diff = day === 0 ? -6 : 1 - day;
   value.setUTCDate(value.getUTCDate() + diff);
@@ -29,6 +31,9 @@ const getWeekStartUtc = (date) => {
 };
 
 const getWeekKey = (date) => getWeekStartUtc(date).toISOString().slice(0, 10);
+
+const isIncognitoSession = (session) =>
+  Array.isArray(session?.tags) && session.tags.includes("incognito");
 
 const getStreakWeeks = (sessions) => {
   if (!sessions.length) return 0;
@@ -64,23 +69,34 @@ router.get("/summary", authMiddleware, async (req, res, next) => {
       .sort({ updatedAt: -1 })
       .lean();
 
-    const totalSessions = sessions.length;
-    const completedSessions = sessions.filter((session) => session.status === "completed").length;
-    const completionRate = totalSessions > 0 ? Math.round((completedSessions / totalSessions) * 100) : 0;
+    const visibleSessions = sessions.filter(
+      (session) => !isIncognitoSession(session),
+    );
 
-    const currentIntensities = sessions
+    const totalSessions = visibleSessions.length;
+    const completedSessions = visibleSessions.filter(
+      (session) => session.status === "completed",
+    ).length;
+    const completionRate =
+      totalSessions > 0
+        ? Math.round((completedSessions / totalSessions) * 100)
+        : 0;
+
+    const currentIntensities = visibleSessions
       .map(getCurrentIntensity)
       .filter((value) => typeof value === "number");
 
-    const initialIntensities = sessions
+    const initialIntensities = visibleSessions
       .map((session) => session?.fearIntensity?.initialScore)
       .filter((value) => typeof value === "number");
 
     const averageIntensity = average(currentIntensities);
     const baselineIntensity = average(initialIntensities);
 
-    const sortedByDate = [...sessions].sort(
-      (left, right) => new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime(),
+    const sortedByDate = [...visibleSessions].sort(
+      (left, right) =>
+        new Date(left.updatedAt).getTime() -
+        new Date(right.updatedAt).getTime(),
     );
 
     const intensityTrend = sortedByDate.slice(-7).map((session, index) => ({
@@ -88,49 +104,56 @@ router.get("/summary", authMiddleware, async (req, res, next) => {
       intensity: getCurrentIntensity(session) ?? 5,
     }));
 
-    const latestSessionWithScore = sessions.find(
+    const latestSessionWithScore = visibleSessions.find(
       (session) => typeof getCurrentIntensity(session) === "number",
     );
-    const latestScore = latestSessionWithScore ? getCurrentIntensity(latestSessionWithScore) : null;
+    const latestScore = latestSessionWithScore
+      ? getCurrentIntensity(latestSessionWithScore)
+      : null;
 
     let bestScore = null;
     let bestScoreTitle = null;
-    sessions.forEach((session) => {
+    visibleSessions.forEach((session) => {
       const score = getCurrentIntensity(session);
       if (typeof score !== "number") return;
       if (bestScore === null || score < bestScore) {
         bestScore = score;
-        bestScoreTitle = session.title || session.fearTitle || "Untitled session";
+        bestScoreTitle =
+          session.title || session.fearTitle || "Untitled session";
       }
     });
 
     const threeWeeksAgo = Date.now() - 21 * 24 * 60 * 60 * 1000;
-    const recentMomentumCount = sessions.filter(
+    const recentMomentumCount = visibleSessions.filter(
       (session) => new Date(session.updatedAt).getTime() >= threeWeeksAgo,
     ).length;
     const momentumLabel =
-      recentMomentumCount >= 4 ? "Building" : recentMomentumCount >= 2 ? "Steady" : "Starting";
+      recentMomentumCount >= 4
+        ? "Building"
+        : recentMomentumCount >= 2
+          ? "Steady"
+          : "Starting";
     const momentumNote = `${recentMomentumCount} session${recentMomentumCount === 1 ? "" : "s"} in three weeks`;
 
-    const streakWeeks = getStreakWeeks(sessions);
+    const streakWeeks = getStreakWeeks(visibleSessions);
 
-    const recentSessions = sessions.slice(0, 6).map((session) => ({
+    const recentSessions = visibleSessions.slice(0, 6).map((session) => ({
       id: String(session._id),
       title: session.title || session.fearTitle || "Untitled session",
       updatedAt: session.updatedAt,
-      messageCount: Array.isArray(session.messages) ? session.messages.length : 0,
+      messageCount: Array.isArray(session.messages)
+        ? session.messages.length
+        : 0,
       intensityStart: session?.fearIntensity?.initialScore ?? 5,
       intensityNow: getCurrentIntensity(session) ?? 5,
       status: session.status,
     }));
 
-    const directionDelta = Number((baselineIntensity - averageIntensity).toFixed(1));
+    const directionDelta = Number(
+      (baselineIntensity - averageIntensity).toFixed(1),
+    );
     const direction =
-      directionDelta > 0.1
-        ? "down"
-        : directionDelta < -0.1
-          ? "up"
-          : "stable";
+      directionDelta > 0.1 ? "down" : directionDelta < -0.1 ? "up" : "stable";
 
     res.json({
       summary: {
