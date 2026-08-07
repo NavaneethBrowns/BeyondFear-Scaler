@@ -1,4 +1,28 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+
+const extractReplyFromJsonish = (text: string): string => {
+  const m = text.match(/"reply"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+  if (!m || !m[1]) return "";
+  try {
+    return JSON.parse(`"${m[1]}"`).trim();
+  } catch {
+    return m[1].trim();
+  }
+};
+
+const sanitizeMessageContent = (content: string): string => {
+  const raw = String(content || "").trim();
+  const stripped = raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```[\s\S]*$/i, "")
+    .trim();
+  if (/^\{[\s\S]*/.test(stripped)) {
+    const extracted = extractReplyFromJsonish(stripped);
+    if (extracted) return extracted;
+  }
+  return stripped || raw;
+};
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
@@ -896,7 +920,7 @@ function ChatWorkspace() {
                   return message.role === "assistant" ? (
                     <div key={id} className="max-w-[54ch]">
                       <div className="rounded-2xl rounded-tl-sm bg-secondary px-5 py-4 text-sm leading-relaxed text-secondary-foreground">
-                        {message.content}
+                        {sanitizeMessageContent(message.content)}
                       </div>
                       <div className="mt-1.5 px-1 text-[11px] text-muted-foreground">
                         {formatMessageTime(message.timestamp)}
@@ -905,7 +929,7 @@ function ChatWorkspace() {
                   ) : (
                     <div key={id} className="ml-auto max-w-[50ch]">
                       <div className="rounded-2xl rounded-tr-sm bg-primary px-5 py-4 text-sm leading-relaxed text-primary-foreground">
-                        {message.content}
+                        {sanitizeMessageContent(message.content)}
                       </div>
                       <div className="mt-1.5 px-1 text-right text-[11px] text-muted-foreground">
                         {formatMessageTime(message.timestamp)}

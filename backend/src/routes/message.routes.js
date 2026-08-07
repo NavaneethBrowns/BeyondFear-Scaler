@@ -519,11 +519,31 @@ const buildFallbackActionItems = ({ currentIntensity, message }) => {
   return candidates.slice(0, targetCount);
 };
 
+const cleanHistoryContent = (content) => {
+  const raw = String(content || "").trim();
+  // Strip fenced code blocks and bare JSON objects from stored assistant messages.
+  const withoutFence = raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```[\s\S]*$/i, "")
+    .trim();
+
+  // If it still looks like a JSON object, pull the reply field out.
+  if (/^\{[\s\S]*/.test(withoutFence)) {
+    const extracted = extractReplyFieldFromJsonish(withoutFence);
+    if (extracted) return extracted;
+  }
+
+  return withoutFence || raw;
+};
+
 const buildGeminiHistory = (conversationHistory) => {
   const mappedHistory = conversationHistory
     .map((msg) => {
       if (msg.role === "assistant") {
-        return { role: "model", parts: [{ text: msg.content }] };
+        const clean = cleanHistoryContent(msg.content);
+        if (!clean) return null;
+        return { role: "model", parts: [{ text: clean }] };
       }
 
       if (msg.role === "user") {
